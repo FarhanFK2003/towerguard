@@ -14,7 +14,10 @@ export type AsyncState<T> =
  */
 export function useAsyncData<T>(load: () => Promise<T>): {
   state: AsyncState<T>;
+  /** Shows the loading state, then loads again. */
   reload: () => void;
+  /** Loads again in the background, keeping current data visible until it arrives. */
+  refresh: () => void;
 } {
   const [state, setState] = useState<AsyncState<T>>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
@@ -39,5 +42,7 @@ export function useAsyncData<T>(load: () => Promise<T>): {
     setAttempt((n) => n + 1);
   }, []);
 
-  return { state, reload };
+  const refresh = useCallback(() => setAttempt((n) => n + 1), []);
+
+  return { state, reload, refresh };
 }

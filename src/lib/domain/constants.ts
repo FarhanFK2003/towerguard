@@ -105,6 +105,16 @@ export const FINDING_STATUS_LABELS: Record<FindingStatus, string> = {
 export const PROVENANCE_SOURCES = ["manual"] as const;
 export type ProvenanceSource = (typeof PROVENANCE_SOURCES)[number];
 
+/** Photograph formats accepted for upload (verified by file signature, not extension). */
+export const PHOTO_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
+export type PhotoMimeType = (typeof PHOTO_MIME_TYPES)[number];
+
+export const PHOTO_MIME_TYPE_LABELS: Record<PhotoMimeType, string> = {
+  "image/jpeg": "JPEG",
+  "image/png": "PNG",
+  "image/webp": "WebP",
+};
+
 export const ANNOTATION_SHAPE_KINDS = ["rect", "point"] as const;
 export type AnnotationShapeKind = (typeof ANNOTATION_SHAPE_KINDS)[number];
 

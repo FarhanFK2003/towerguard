@@ -43,9 +43,11 @@ src/
     ui/                reusable primitives (Button, Badge, Card, Callout, Field, ConfirmDialog, …)
     dashboard/         dashboard-specific sections
     inspections/       inspection form, list, overview
+    photos/            photo gallery, upload, viewer
   hooks/               React hooks (client-side data loading)
   lib/
     domain/            typed models, enumerations, validation (framework-independent)
+    photos/            file validation, SHA-256, thumbnails (browser APIs, no React)
     storage/           IndexedDB wrapper and repositories (framework-independent)
 tests/                 Vitest unit tests (IndexedDB tests use fake-indexeddb)
 e2e/                   dependency-free browser checks (headless Edge/Chrome via DevTools Protocol)
@@ -56,3 +58,11 @@ e2e/                   dependency-free browser checks (headless Edge/Chrome via 
 Data lives in the browser's IndexedDB database `towerguard` (stores: `inspections`, `photos`,
 `photoBlobs`, `annotations`, `findings`). Clearing site data for the app deletes it, and it is not
 shared between browsers or devices.
+
+## Photographs
+
+- JPEG, PNG and WebP, up to 20 MB each. The format is detected from the file's signature bytes.
+- The original file is stored byte-for-byte as a Blob and fingerprinted with SHA-256 (Web Crypto).
+  It is never resized, recompressed or rotated; a separate 480 px JPEG thumbnail is used for galleries.
+- Metadata (`photos`) and image data (`photoBlobs`) are written and deleted in single transactions.
+- No capture date, GPS or other EXIF data is read or inferred.

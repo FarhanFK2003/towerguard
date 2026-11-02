@@ -22,8 +22,11 @@ async function readStorageState(): Promise<StorageState> {
   }
 }
 
-/** Shows this origin's real browser storage usage and quota. */
-export function StorageStatus() {
+/**
+ * Shows this origin's real browser storage usage and quota. Change
+ * `refreshKey` to re-read it (e.g. after photographs are added or removed).
+ */
+export function StorageStatus({ refreshKey = 0 }: { refreshKey?: number }) {
   const [state, setState] = useState<StorageState>({ status: "loading" });
 
   useEffect(() => {
@@ -34,7 +37,7 @@ export function StorageStatus() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshKey]);
 
   if (state.status === "loading") {
     return (

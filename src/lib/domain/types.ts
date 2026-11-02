@@ -4,6 +4,7 @@ import type {
   FindingStatus,
   InspectionStatus,
   InspectorPriority,
+  PhotoMimeType,
   ProvenanceSource,
   StructureType,
 } from "./constants";
@@ -41,15 +42,21 @@ export interface Inspection {
 export interface PhotoRecord {
   id: ID;
   inspectionId: ID;
+  /** Name of the file as selected by the user. */
   fileName: string;
-  mimeType: string;
+  /** Detected from the file's signature bytes. */
+  mimeType: PhotoMimeType;
   sizeBytes: number;
+  /** Pixel dimensions as displayed (EXIF orientation applied by the browser). */
   width: number;
   height: number;
-  /** Hex SHA-256 of the original, unmodified file. */
+  /** Lower-case hex SHA-256 of the original, unmodified file bytes. */
   sha256: string;
   uploadedAt: IsoDateTime;
+  /** Last change to caption or viewpoint; equals `uploadedAt` until edited. */
+  updatedAt: IsoDateTime;
   caption?: string;
+  /** Where the photo was taken from, e.g. "North face, upper section". */
   viewpoint?: string;
 }
 

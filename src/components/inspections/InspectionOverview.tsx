@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { ClipboardList, Images, Info, ListChecks, RotateCw, SearchX } from "lucide-react";
+import { ClipboardList, HardDrive, Info, ListChecks, RotateCw, SearchX } from "lucide-react";
+import { StorageStatus } from "@/components/dashboard/StorageStatus";
 import { BackLink } from "@/components/layout/BackLink";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { PhotoGallery } from "@/components/photos/PhotoGallery";
 import { Button, buttonClasses } from "@/components/ui/Button";
 import { Callout } from "@/components/ui/Callout";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
@@ -73,6 +75,9 @@ export function InspectionOverview({ inspectionId }: { inspectionId: string }) {
 }
 
 function InspectionDetails({ inspection }: { inspection: Inspection }) {
+  const [storageVersion, setStorageVersion] = useState(0);
+  const onStorageChanged = useCallback(() => setStorageVersion((v) => v + 1), []);
+
   return (
     <div className="space-y-6">
       <BackLink href="/">Dashboard</BackLink>
@@ -124,20 +129,7 @@ function InspectionDetails({ inspection }: { inspection: Inspection }) {
             </CardBody>
           </Card>
 
-          <Card>
-            <CardHeader
-              title="Photographs"
-              description="Original photographs and annotated evidence."
-              icon={<Images />}
-            />
-            <CardBody>
-              <EmptyState
-                icon={<Images />}
-                title="No photographs yet"
-                description="Photo upload is not available yet."
-              />
-            </CardBody>
-          </Card>
+          <PhotoGallery inspectionId={inspection.id} onStorageChanged={onStorageChanged} />
         </div>
 
         <div className="space-y-6">
@@ -162,6 +154,17 @@ function InspectionDetails({ inspection }: { inspection: Inspection }) {
                   <span className="break-all font-mono text-xs text-slate-600">{inspection.id}</span>
                 </Detail>
               </dl>
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Local storage"
+              description="Shared by all inspections in this browser."
+              icon={<HardDrive />}
+            />
+            <CardBody>
+              <StorageStatus refreshKey={storageVersion} />
             </CardBody>
           </Card>
         </div>

@@ -25,11 +25,12 @@ export function CardHeader({ title, description, icon, action, className }: Card
   return (
     <header
       className={cn(
-        "flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4",
+        // Wraps the action below the title on narrow screens instead of squeezing the text.
+        "flex flex-wrap items-start justify-between gap-x-4 gap-y-3 border-b border-slate-200 px-5 py-4",
         className,
       )}
     >
-      <div className="flex min-w-0 items-start gap-3">
+      <div className="flex min-w-0 flex-1 basis-56 items-start gap-3">
         {icon ? (
           <span className="mt-0.5 text-slate-500 [&_svg]:size-5" aria-hidden="true">
             {icon}
