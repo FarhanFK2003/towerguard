@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes, formatPercent } from "@/lib/format";
+import { formatBytes, formatIsoDate, formatPercent, formatTimestamp } from "@/lib/format";
 
 describe("formatBytes", () => {
   it("formats values below 1 KB as bytes", () => {
@@ -39,5 +39,26 @@ describe("formatPercent", () => {
     expect(formatPercent(1.5)).toBe("100%");
     expect(formatPercent(-0.2)).toBe("0%");
     expect(formatPercent(Number.NaN)).toBe("—");
+  });
+});
+
+describe("formatIsoDate", () => {
+  it("formats calendar dates without time-zone shifts", () => {
+    expect(formatIsoDate("2026-11-02")).toBe("2 Nov 2026");
+    expect(formatIsoDate("2026-01-01")).toBe("1 Jan 2026");
+  });
+
+  it("returns unrecognised input unchanged", () => {
+    expect(formatIsoDate("not-a-date")).toBe("not-a-date");
+  });
+});
+
+describe("formatTimestamp", () => {
+  it("formats a valid timestamp including the year", () => {
+    expect(formatTimestamp("2026-06-15T12:00:00.000Z")).toContain("2026");
+  });
+
+  it("returns unrecognised input unchanged", () => {
+    expect(formatTimestamp("yesterday")).toBe("yesterday");
   });
 });

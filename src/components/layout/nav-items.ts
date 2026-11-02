@@ -11,5 +11,5 @@ export interface NavItem {
 
 export const NAV_ITEMS: readonly NavItem[] = [
   { label: "Dashboard", href: "/", icon: LayoutDashboard, available: true },
-  { label: "New inspection", href: "/inspections/new", icon: ClipboardPlus, available: false },
+  { label: "New inspection", href: "/inspections/new", icon: ClipboardPlus, available: true },
 ];

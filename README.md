@@ -28,6 +28,7 @@ npm run dev        # development server on http://localhost:3000
 npm run build      # production build
 npm start          # serve the production build
 npm test           # unit tests (Vitest)
+npm run test:e2e -- http://localhost:3000   # browser checks (needs a running app + Edge/Chrome)
 npm run lint       # ESLint
 npm run typecheck  # TypeScript, no emit
 ```
@@ -36,11 +37,22 @@ npm run typecheck  # TypeScript, no emit
 
 ```
 src/
-  app/                 routes (App Router)
+  app/                 routes (App Router): /, /inspections/new, /inspections/[id]
   components/
     layout/            application shell, navigation, page header
-    ui/                reusable primitives (Button, Badge, Card, Callout, EmptyState, StatCard)
+    ui/                reusable primitives (Button, Badge, Card, Callout, Field, ConfirmDialog, …)
     dashboard/         dashboard-specific sections
-  lib/                 framework-independent helpers
-tests/                 Vitest unit tests
+    inspections/       inspection form, list, overview
+  hooks/               React hooks (client-side data loading)
+  lib/
+    domain/            typed models, enumerations, validation (framework-independent)
+    storage/           IndexedDB wrapper and repositories (framework-independent)
+tests/                 Vitest unit tests (IndexedDB tests use fake-indexeddb)
+e2e/                   dependency-free browser checks (headless Edge/Chrome via DevTools Protocol)
 ```
+
+## Local data
+
+Data lives in the browser's IndexedDB database `towerguard` (stores: `inspections`, `photos`,
+`photoBlobs`, `annotations`, `findings`). Clearing site data for the app deletes it, and it is not
+shared between browsers or devices.

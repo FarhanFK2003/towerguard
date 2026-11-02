@@ -1,3 +1,5 @@
+import { isIsoDate } from "@/lib/dates";
+
 const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
 
 /** Human-readable binary size, e.g. `1536` → `"1.5 KB"`. Invalid input → `"—"`. */
@@ -21,4 +23,32 @@ export function formatPercent(fraction: number): string {
   const clamped = Math.min(Math.max(fraction, 0), 1);
   if (clamped > 0 && clamped < 0.01) return "<1%";
   return `${Math.round(clamped * 100)}%`;
+}
+
+// Calendar dates have no time zone, so format them in UTC to avoid off-by-one shifts.
+const DATE_FORMAT = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+const TIMESTAMP_FORMAT = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+/** `2026-11-02` → `"2 Nov 2026"`. Unrecognised input is returned unchanged. */
+export function formatIsoDate(date: string): string {
+  if (!isIsoDate(date)) return date;
+  return DATE_FORMAT.format(new Date(`${date}T00:00:00Z`));
+}
+
+/** ISO timestamp in the user's local time zone. Unrecognised input is returned unchanged. */
+export function formatTimestamp(timestamp: string): string {
+  const ms = Date.parse(timestamp);
+  return Number.isNaN(ms) ? timestamp : TIMESTAMP_FORMAT.format(ms);
 }
