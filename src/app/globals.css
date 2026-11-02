@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+/*
+ * System font stacks keep the app fully offline-capable: no font downloads at
+ * build time or runtime.
+ */
+@theme {
+  --font-sans:
+    ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-mono:
+    ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas, "Liberation Mono",
+    monospace;
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-slate-100 font-sans text-slate-900;
+}

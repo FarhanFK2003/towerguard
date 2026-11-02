@@ -1,0 +1,24 @@
+const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
+
+/** Human-readable binary size, e.g. `1536` → `"1.5 KB"`. Invalid input → `"—"`. */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "—";
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < BYTE_UNITS.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const digits = value < 10 ? 1 : 0;
+  return `${value.toFixed(digits)} ${BYTE_UNITS[unit]}`;
+}
+
+/** Fraction in [0, 1] as a whole-number percentage string. */
+export function formatPercent(fraction: number): string {
+  if (!Number.isFinite(fraction)) return "—";
+  const clamped = Math.min(Math.max(fraction, 0), 1);
+  if (clamped > 0 && clamped < 0.01) return "<1%";
+  return `${Math.round(clamped * 100)}%`;
+}
