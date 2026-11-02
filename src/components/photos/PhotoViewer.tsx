@@ -3,6 +3,7 @@
 import { useCallback, type ReactNode } from "react";
 import Link from "next/link";
 import { Download, FileImage, ImageOff, PencilLine, RotateCw, SearchX } from "lucide-react";
+import { AnnotationWorkspace } from "@/components/annotations/AnnotationWorkspace";
 import { BackLink } from "@/components/layout/BackLink";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button, buttonClasses } from "@/components/ui/Button";
@@ -16,6 +17,7 @@ import { PHOTO_MIME_TYPE_LABELS } from "@/lib/domain/constants";
 import type { ID, PhotoRecord } from "@/lib/domain/types";
 import { formatBytes, formatTimestamp } from "@/lib/format";
 import { describeStorageError } from "@/lib/storage/errors";
+import { getInspection } from "@/lib/storage/inspections";
 import { getPhoto, getPhotoOriginal } from "@/lib/storage/photos";
 import { DeletePhotoButton } from "./DeletePhotoButton";
 import { IntegrityCheck } from "./IntegrityCheck";
@@ -31,7 +33,10 @@ function Detail({ label, children }: { label: string; children: ReactNode }) {
 }
 
 export function PhotoViewer({ inspectionId, photoId }: { inspectionId: ID; photoId: ID }) {
-  const load = useCallback(() => getPhoto(photoId), [photoId]);
+  const load = useCallback(
+    () => Promise.all([getPhoto(photoId), getInspection(inspectionId)]),
+    [photoId, inspectionId],
+  );
   const { state, reload, refresh } = useAsyncData(load);
 
   if (state.status === "loading") return <PhotoViewerSkeleton />;
@@ -51,8 +56,9 @@ export function PhotoViewer({ inspectionId, photoId }: { inspectionId: ID; photo
     );
   }
 
+  const [photo, inspection] = state.data;
   // A photo belonging to another inspection is treated as not found for this URL.
-  if (!state.data || state.data.inspectionId !== inspectionId) {
+  if (!photo || !inspection || photo.inspectionId !== inspectionId) {
     return (
       <EmptyState
         className="bg-white py-20"
@@ -68,12 +74,64 @@ export function PhotoViewer({ inspectionId, photoId }: { inspectionId: ID; photo
     );
   }
 
-  return <PhotoDetails photo={state.data} onUpdated={refresh} />;
+  return <PhotoDetails photo={photo} inspectorName={inspection.inspectorName} onUpdated={refresh} />;
 }
 
-function PhotoDetails({ photo, onUpdated }: { photo: PhotoRecord; onUpdated: () => void }) {
+function PhotoDetails({
+  photo,
+  inspectorName,
+  onUpdated,
+}: {
+  photo: PhotoRecord;
+  inspectorName: string;
+  onUpdated: () => void;
+}) {
   const loadOriginal = useCallback(() => getPhotoOriginal(photo.id), [photo.id]);
   const image = useStoredImage(loadOriginal);
+
+  const sidebar = (
+    <>
+      <Card>
+        <CardHeader title="Caption & viewpoint" icon={<PencilLine />} />
+        <CardBody>
+          <PhotoDetailsForm photo={photo} onSaved={onUpdated} />
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title="Evidence record" icon={<FileImage />} />
+        <CardBody>
+          <dl className="space-y-4">
+            <Detail label="File name">
+              <span className="break-all">{photo.fileName}</span>
+            </Detail>
+            <Detail label="Format">{PHOTO_MIME_TYPE_LABELS[photo.mimeType]}</Detail>
+            <Detail label="File size">
+              {formatBytes(photo.sizeBytes)}{" "}
+              <span className="text-slate-500">({photo.sizeBytes.toLocaleString("en-GB")} bytes)</span>
+            </Detail>
+            <Detail label="Dimensions">
+              <span className="tabular-nums">
+                {photo.width} × {photo.height} px
+              </span>
+            </Detail>
+            <Detail label="Uploaded">{formatTimestamp(photo.uploadedAt)}</Detail>
+            {photo.updatedAt !== photo.uploadedAt ? (
+              <Detail label="Details last edited">{formatTimestamp(photo.updatedAt)}</Detail>
+            ) : null}
+            <Detail label="SHA-256 (original file)">
+              <span className="break-all font-mono text-xs text-slate-700" data-testid="photo-sha256">
+                {photo.sha256}
+              </span>
+            </Detail>
+          </dl>
+          <div className="mt-4 border-t border-slate-200 pt-4">
+            <IntegrityCheck photo={photo} />
+          </div>
+        </CardBody>
+      </Card>
+    </>
+  );
 
   return (
     <div className="space-y-6">
@@ -96,74 +154,29 @@ function PhotoDetails({ photo, onUpdated }: { photo: PhotoRecord; onUpdated: () 
         }
       />
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <figure className="space-y-2 lg:col-span-2">
-          <div className="flex min-h-64 items-center justify-center overflow-hidden rounded-lg bg-slate-900">
-            {image.status === "ready" ? (
-              // eslint-disable-next-line @next/next/no-img-element -- local object URL; next/image cannot optimise it
-              <img
-                src={image.url}
-                alt={photo.caption ?? photo.fileName}
-                className="max-h-[75vh] w-auto max-w-full object-contain"
-              />
-            ) : image.status === "loading" ? (
-              <Skeleton className="h-96 w-full rounded-none bg-slate-800" />
-            ) : (
-              <div className="flex flex-col items-center gap-2 p-10 text-center text-sm text-red-200">
-                <ImageOff className="size-8" aria-hidden="true" />
-                {image.status === "missing"
-                  ? "The original image data is missing from storage."
-                  : describeStorageError(image.error)}
-              </div>
-            )}
-          </div>
-          <figcaption className="text-xs text-slate-500">
-            Original file as uploaded, displayed without modification.
-          </figcaption>
-        </figure>
+      {image.status === "ready" ? (
+        <AnnotationWorkspace photo={photo} imageUrl={image.url} recordedBy={inspectorName} sidebar={sidebar} />
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-3">
+          <figure className="space-y-2 lg:col-span-2">
+            <div className="flex min-h-64 items-center justify-center overflow-hidden rounded-lg bg-slate-900">
+              {image.status === "loading" ? (
+                <Skeleton className="h-96 w-full rounded-none bg-slate-800" />
+              ) : (
+                <div className="flex flex-col items-center gap-2 p-10 text-center text-sm text-red-200">
+                  <ImageOff className="size-8" aria-hidden="true" />
+                  {image.status === "missing"
+                    ? "The original image data is missing from storage."
+                    : describeStorageError(image.error)}
+                </div>
+              )}
+            </div>
+            <figcaption className="text-xs text-slate-500">Annotation is unavailable without the original image.</figcaption>
+          </figure>
 
-        <div className="space-y-6">
-          <Card>
-            <CardHeader title="Caption & viewpoint" icon={<PencilLine />} />
-            <CardBody>
-              <PhotoDetailsForm photo={photo} onSaved={onUpdated} />
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader title="Evidence record" icon={<FileImage />} />
-            <CardBody>
-              <dl className="space-y-4">
-                <Detail label="File name">
-                  <span className="break-all">{photo.fileName}</span>
-                </Detail>
-                <Detail label="Format">{PHOTO_MIME_TYPE_LABELS[photo.mimeType]}</Detail>
-                <Detail label="File size">
-                  {formatBytes(photo.sizeBytes)}{" "}
-                  <span className="text-slate-500">({photo.sizeBytes.toLocaleString("en-GB")} bytes)</span>
-                </Detail>
-                <Detail label="Dimensions">
-                  <span className="tabular-nums">
-                    {photo.width} × {photo.height} px
-                  </span>
-                </Detail>
-                <Detail label="Uploaded">{formatTimestamp(photo.uploadedAt)}</Detail>
-                {photo.updatedAt !== photo.uploadedAt ? (
-                  <Detail label="Details last edited">{formatTimestamp(photo.updatedAt)}</Detail>
-                ) : null}
-                <Detail label="SHA-256 (original file)">
-                  <span className="break-all font-mono text-xs text-slate-700" data-testid="photo-sha256">
-                    {photo.sha256}
-                  </span>
-                </Detail>
-              </dl>
-              <div className="mt-4 border-t border-slate-200 pt-4">
-                <IntegrityCheck photo={photo} />
-              </div>
-            </CardBody>
-          </Card>
+          <div className="space-y-6">{sidebar}</div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -433,7 +433,7 @@ async function photoEvidence() {
     // 5. Open the photograph.
     await evaluate(`document.querySelector('a[data-photo-id="${meta.id}"]').click()`);
     await waitFor(
-      `location.pathname === "/inspections/${inspectionId}/photos/${meta.id}" && document.querySelector("figure img")?.naturalWidth === 2400`,
+      `location.pathname === "/inspections/${inspectionId}/photos/${meta.id}" && document.querySelector('[data-testid="annotation-stage"] img')?.naturalWidth === 2400`,
       "photo viewer",
     );
     record(
@@ -504,7 +504,7 @@ async function photoEvidence() {
     const target = before.photos.find((p) => p.fileName === "tower-antenna-mount.webp");
     const others = before.photos.filter((p) => p.id !== target.id);
     await evaluate(`document.querySelector('a[data-photo-id="${target.id}"]').click()`);
-    await waitFor(`document.querySelector("figure img")?.naturalWidth === 1200`, "webp viewer");
+    await waitFor(`document.querySelector('[data-testid="annotation-stage"] img')?.naturalWidth === 1200`, "webp viewer");
     await evaluate(clickByText("button", "Delete"));
     await waitFor(`document.querySelector("dialog")?.open === true`, "delete dialog");
     await screenshot("12-delete-photo-dialog");
@@ -533,7 +533,7 @@ async function photoEvidence() {
     const galleryOverflow = await evaluate(`document.documentElement.scrollWidth > window.innerWidth`);
     await screenshot("13-gallery-mobile");
     await evaluate(`document.querySelector('ul[aria-label="Photographs"] a').click()`);
-    await waitFor(`document.querySelector("figure img")?.complete === true`, "viewer on mobile");
+    await waitFor(`document.querySelector('[data-testid="annotation-stage"] img')?.complete === true`, "viewer on mobile");
     await delay(300);
     const viewerOverflow = await evaluate(`document.documentElement.scrollWidth > window.innerWidth`);
     await screenshot("14-viewer-mobile");
@@ -544,12 +544,244 @@ async function photoEvidence() {
   }
 }
 
+// ---- Annotation workspace -------------------------------------------------
+
+const STAGE_IMG = `document.querySelector('[data-testid="annotation-stage"] img')`;
+const readAnnotations = withStore("annotations", "readonly", `const r = store.getAll(); r.onsuccess = () => { result = r.result; };`);
+const listCount = `document.querySelectorAll("[data-annotation-item]").length`;
+const saved = `document.querySelector('[data-testid="save-status"]')?.dataset.saveStatus === "saved"`;
+
+/** Screen position of a normalised image point, using the image's current on-screen rect. */
+async function imagePoint(fx, fy) {
+  const r = await evaluate(`(() => { const b = ${STAGE_IMG}.getBoundingClientRect(); return { left: b.left, top: b.top, width: b.width, height: b.height }; })()`);
+  return { x: r.left + fx * r.width, y: r.top + fy * r.height, rect: r };
+}
+
+/** A real mouse drag through the browser's input pipeline (fires pointer events). */
+async function mouseDrag(from, to, steps = 10) {
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x, y: from.y, buttons: 0 });
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x: from.x, y: from.y, button: "left", buttons: 1, clickCount: 1 });
+  for (let i = 1; i <= steps; i++) {
+    const x = from.x + ((to.x - from.x) * i) / steps;
+    const y = from.y + ((to.y - from.y) * i) / steps;
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "left", buttons: 1 });
+  }
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: to.x, y: to.y, button: "left", buttons: 0, clickCount: 1 });
+}
+
+/** A real touch tap (touch emulation enabled only for its duration). */
+async function touchTap(point) {
+  await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+  await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: point.x, y: point.y }] });
+  await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await send("Emulation.setTouchEmulationEnabled", { enabled: false });
+}
+
+/**
+ * Compares every drawn shape's on-screen position with the position implied by
+ * its stored normalised coordinates and the image's on-screen rect.
+ */
+async function alignmentError() {
+  return evaluate(`${readAnnotations}.then((stored) => {
+    const img = ${STAGE_IMG}.getBoundingClientRect();
+    const svg = document.querySelector('[data-testid="annotation-overlay"]').getBoundingClientRect();
+    let worst = Math.max(Math.abs(svg.left - img.left), Math.abs(svg.top - img.top), Math.abs(svg.width - img.width), Math.abs(svg.height - img.height));
+    for (const a of stored) {
+      const g = document.querySelector('[data-annotation-id="' + a.id + '"] [data-shape]');
+      if (!g) return { worst: Infinity, missing: a.id };
+      const b = g.getBoundingClientRect();
+      const s = a.shape;
+      const expected = s.kind === "rect"
+        ? { left: img.left + s.x * img.width, top: img.top + s.y * img.height, right: img.left + (s.x + s.width) * img.width, bottom: img.top + (s.y + s.height) * img.height }
+        : { cx: img.left + s.x * img.width, cy: img.top + s.y * img.height };
+      const errors = s.kind === "rect"
+        ? [b.left - expected.left, b.top - expected.top, b.right - expected.right, b.bottom - expected.bottom]
+        : [(b.left + b.right) / 2 - expected.cx, (b.top + b.bottom) / 2 - expected.cy];
+      worst = Math.max(worst, ...errors.map(Math.abs));
+    }
+    return { worst, count: stored.length };
+  })`);
+}
+
+const near = (a, b, tolerance = 0.004) => Math.abs(a - b) <= tolerance;
+
+async function annotationWorkspace() {
+  const inspectionId = "e2e-photos";
+  const { photos } = await evaluate(readPhotoState);
+  const photo = photos.find((p) => p.fileName === "tower-north-face.jpg");
+
+  // 1–2. Open the inspection, then the photograph's annotation workspace.
+  await navigate(`/inspections/${inspectionId}`);
+  await waitFor(galleryImagesLoaded(3), "gallery");
+  await evaluate(`document.querySelector('a[data-photo-id="${photo.id}"]').click()`);
+  await waitFor(`${STAGE_IMG}?.naturalWidth === 2400 && ${STAGE_IMG}.complete && !!document.querySelector('[data-testid="annotation-overlay"]')`, "workspace");
+  await evaluate(`document.querySelector('[data-testid="annotation-viewport"]').scrollIntoView({ block: "center" })`);
+  await delay(200);
+  const initial = await alignmentError();
+  const baseImg = await imagePoint(0, 0);
+  record("Annotation workspace opens with the SVG overlay exactly over the photograph", initial.worst < 0.5, `max offset ${initial.worst.toFixed(2)} px`);
+
+  // 3–4. Draw a rectangle with the mouse; it is saved automatically.
+  await evaluate(clickByText("button", "Rectangle"));
+  record("Toolbar shows the active tool", await evaluate(`[...document.querySelectorAll('[role="toolbar"] button')].find(b => b.textContent.trim() === "Rectangle").getAttribute("aria-pressed") === "true"`));
+  await mouseDrag(await imagePoint(0.2, 0.3), await imagePoint(0.5, 0.6));
+  await waitFor(`${listCount} === 1 && ${saved}`, "rectangle saved");
+  let stored = await evaluate(readAnnotations);
+  const rect = stored[0];
+  record(
+    "Mouse-drawn rectangle is saved in normalised image coordinates (not screen pixels)",
+    stored.length === 1 && rect.shape.kind === "rect" && near(rect.shape.x, 0.2) && near(rect.shape.y, 0.3) &&
+      near(rect.shape.width, 0.3) && near(rect.shape.height, 0.3),
+    JSON.stringify(rect.shape),
+  );
+  record(
+    "Saved annotation has IDs, manual provenance and timestamps",
+    rect.inspectionId === inspectionId && rect.photoId === photo.id && rect.provenance.source === "manual" &&
+      rect.provenance.recordedBy === "Test Inspector" && rect.createdAt === rect.updatedAt && /^[0-9a-f-]{36}$/.test(rect.id),
+  );
+  await screenshot("15-annotation-rectangle");
+
+  // 5. Refresh: it remains, drawn in the same place.
+  await reload();
+  await waitFor(`${STAGE_IMG}?.complete && ${listCount} === 1 && !!document.querySelector('[data-shape="rect"]')`, "after reload");
+  await evaluate(`document.querySelector('[data-testid="annotation-viewport"]').scrollIntoView({ block: "center" })`);
+  await delay(200);
+  const afterReload = await alignmentError();
+  record("Rectangle persists after refresh and is redrawn at its stored position", afterReload.worst < 1.5, `max offset ${afterReload.worst.toFixed(2)} px`);
+
+  // 6. Create a point with a real touch tap.
+  await evaluate(clickByText("button", "Point"));
+  await touchTap(await imagePoint(0.7, 0.4));
+  await waitFor(`${listCount} === 2 && ${saved}`, "point saved");
+  stored = await evaluate(readAnnotations);
+  const point = stored.find((a) => a.shape.kind === "point");
+  record("Touch tap creates a point at the tapped image position", point && near(point.shape.x, 0.7) && near(point.shape.y, 0.4), JSON.stringify(point?.shape));
+
+  // 7. Select from the list: the shape is highlighted and resize handles appear.
+  await evaluate(`document.querySelector('[data-annotation-item="${rect.id}"]').click()`);
+  await waitFor(`document.querySelector('[data-annotation-item="${rect.id}"]').getAttribute("aria-pressed") === "true"`, "list selection");
+  record(
+    "Selecting from the list highlights the shape and shows resize handles",
+    (await evaluate(`document.querySelector('[data-annotation-id="${rect.id}"]').hasAttribute("data-selected")`)) &&
+      (await evaluate(`document.querySelectorAll('[data-handle]').length`)) === 8 &&
+      (await evaluate(bodyHas("#1 · Rectangle"))),
+  );
+
+  // 8. Move the rectangle by dragging its interior.
+  await mouseDrag(await imagePoint(0.35, 0.45), await imagePoint(0.45, 0.5));
+  await waitFor(`${saved}`, "move saved");
+  await waitFor(`${readAnnotations}.then((s) => s.find((a) => a.id === "${rect.id}").shape.x > 0.25)`, "moved in storage");
+  stored = await evaluate(readAnnotations);
+  let moved = stored.find((a) => a.id === rect.id).shape;
+  record("Dragging a rectangle moves it (size unchanged)", near(moved.x, 0.3) && near(moved.y, 0.35) && near(moved.width, 0.3) && near(moved.height, 0.3), JSON.stringify(moved));
+
+  // 9. Resize with the south-east corner handle.
+  await mouseDrag(await imagePoint(moved.x + moved.width, moved.y + moved.height), await imagePoint(0.75, 0.8));
+  await waitFor(`${readAnnotations}.then((s) => s.find((a) => a.id === "${rect.id}").shape.width > 0.4)`, "resized in storage");
+  stored = await evaluate(readAnnotations);
+  const resized = stored.find((a) => a.id === rect.id).shape;
+  record("Dragging a corner handle resizes the rectangle; the opposite corner stays fixed", near(resized.x, 0.3) && near(resized.y, 0.35) && near(resized.width, 0.45) && near(resized.height, 0.45), JSON.stringify(resized));
+
+  // 10. Change its label.
+  await evaluate(`(() => { const s = document.querySelector("#annotation-label");
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(s, "corrosion");
+    s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  await waitFor(`${readAnnotations}.then((s) => s.find((a) => a.id === "${rect.id}").label === "corrosion")`, "label saved");
+  record("Label change is saved and shown in the list", await evaluate(`document.querySelector('[data-annotation-item="${rect.id}"]').textContent.includes("Corrosion")`));
+
+  // 13–14. Zoom in: alignment holds, editing still works, panning moves the image.
+  await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.includes("Zoom in")).click()`);
+  await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.includes("Zoom in")).click()`);
+  await waitFor(`document.querySelector('[data-testid="zoom-level"]').textContent === "200%"`, "zoom 200%");
+  await delay(150);
+  const zoomed = await alignmentError();
+  const zoomedImg = await imagePoint(0, 0);
+  record(
+    "At 200% zoom the image doubles in size and every shape stays aligned",
+    near(zoomedImg.rect.width, baseImg.rect.width * 2, 1) && zoomed.worst < 1.5,
+    `image ${Math.round(baseImg.rect.width)} → ${Math.round(zoomedImg.rect.width)} px wide, max offset ${zoomed.worst.toFixed(2)} px`,
+  );
+
+  const pointBefore = (await evaluate(readAnnotations)).find((a) => a.id === point.id).shape;
+  const from = await imagePoint(pointBefore.x, pointBefore.y);
+  await mouseDrag(from, { x: from.x + 40, y: from.y + 30 });
+  await waitFor(`${readAnnotations}.then((s) => s.find((a) => a.id === "${point.id}").shape.x > ${pointBefore.x})`, "point moved at zoom");
+  const pointAfter = (await evaluate(readAnnotations)).find((a) => a.id === point.id).shape;
+  record(
+    "Moving a point at 200% zoom stores the correct image-relative change",
+    near(pointAfter.x - pointBefore.x, 40 / from.rect.width, 0.002) && near(pointAfter.y - pointBefore.y, 30 / from.rect.height, 0.002),
+    `Δx ${(pointAfter.x - pointBefore.x).toFixed(4)} (expected ${(40 / from.rect.width).toFixed(4)})`,
+  );
+
+  const shapesBeforePan = JSON.stringify((await evaluate(readAnnotations)).map((a) => a.shape));
+  const beforePan = await imagePoint(0, 0);
+  const panFrom = await imagePoint(0.27, 0.28);
+  await mouseDrag(panFrom, { x: panFrom.x + 60, y: panFrom.y + 40 });
+  await delay(150);
+  const panned = await imagePoint(0, 0);
+  const pannedAlign = await alignmentError();
+  const shapesAfterPan = JSON.stringify((await evaluate(readAnnotations)).map((a) => a.shape));
+  record(
+    "Dragging empty space pans the zoomed image; overlay stays aligned; no annotation changes",
+    near(panned.rect.left - beforePan.rect.left, 60, 1) && near(panned.rect.top - beforePan.rect.top, 40, 1) &&
+      pannedAlign.worst < 1.5 && shapesAfterPan === shapesBeforePan,
+    `moved ${Math.round(panned.rect.left - beforePan.rect.left)}, ${Math.round(panned.rect.top - beforePan.rect.top)} px`,
+  );
+  await screenshot("16-annotation-zoomed");
+
+  await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.includes("Zoom out")).click()`);
+  await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.includes("Reset view")).click()`);
+  await waitFor(`document.querySelector('[data-testid="zoom-level"]').textContent === "100%"`, "reset view");
+  await delay(150);
+  const resetAlign = await alignmentError();
+  const resetImg = await imagePoint(0, 0);
+  record(
+    "Zoom out and Reset view return to 100% (original size and position) with shapes still aligned",
+    near(resetImg.rect.width, baseImg.rect.width, 1) && near(resetImg.rect.left, baseImg.rect.left, 1) && resetAlign.worst < 1.5,
+    `max offset ${resetAlign.worst.toFixed(2)} px`,
+  );
+
+  // 11–12. Delete an annotation (explicit confirmation), then check it stays deleted.
+  await evaluate(`document.querySelector('[data-annotation-item="${point.id}"]').click()`);
+  await waitFor(`!!document.querySelector('[data-testid="annotation-details"]')`, "details");
+  await evaluate(`[...document.querySelectorAll('[data-testid="annotation-details"] > button')].find(b => b.textContent.includes("Delete annotation")).click()`);
+  await waitFor(`!!document.querySelector("dialog[open]")`, "delete dialog");
+  record("Deleting asks for explicit confirmation", (await evaluate(readAnnotations)).length === 2);
+  await evaluate(`[...document.querySelectorAll("dialog[open] button")].find(b => b.textContent.includes("Delete annotation")).click()`);
+  await waitFor(`${listCount} === 1 && ${saved}`, "deleted");
+  await reload();
+  await waitFor(`${STAGE_IMG}?.complete && ${listCount} === 1`, "reload after delete");
+  stored = await evaluate(readAnnotations);
+  record("Deletion persists after refresh; the other annotation is unchanged", stored.length === 1 && stored[0].id === rect.id && stored[0].label === "corrosion" && JSON.stringify(stored[0].shape) === JSON.stringify(resized));
+
+  // 15–16. Mobile width.
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await reload();
+  await waitFor(`${STAGE_IMG}?.complete && ${listCount} === 1`, "mobile workspace");
+  await delay(300);
+  const overflow = await evaluate(`document.documentElement.scrollWidth > window.innerWidth`);
+  const mobileAlign = await alignmentError();
+  record("Workspace at 390px: no horizontal overflow and shapes aligned", !overflow && mobileAlign.worst < 1.5, `overflow=${overflow}, max offset ${mobileAlign.worst.toFixed(2)} px`);
+  await screenshot("17-annotation-mobile");
+  await send("Emulation.clearDeviceMetricsOverride");
+
+  // Photo deletion removes its annotations (cascade), checked in the real browser.
+  await reload();
+  await waitFor(`${STAGE_IMG}?.complete`, "workspace before photo delete");
+  await evaluate(`[...document.querySelectorAll("button")].find(b => b.textContent.trim() === "Delete").click()`);
+  await waitFor(`!!document.querySelector("dialog[open]")`, "photo delete dialog");
+  await evaluate(`[...document.querySelectorAll("dialog[open] button")].find(b => b.textContent.includes("Delete photograph")).click()`);
+  await waitFor(`location.pathname === "/inspections/${inspectionId}"`, "back to inspection");
+  record("Deleting the photograph also removes its annotations", (await evaluate(readAnnotations)).length === 0);
+}
+
 try {
   await send("Page.enable");
   await send("Runtime.enable");
   await inspectionLifecycle();
   await damagedRecords();
   await photoEvidence();
+  await annotationWorkspace();
 } catch (error) {
   record("Browser run aborted", false, error.message);
   try {

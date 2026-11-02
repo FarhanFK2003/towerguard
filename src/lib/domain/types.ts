@@ -1,4 +1,5 @@
 import type {
+  AnnotationLabel,
   DefectCategory,
   EngineeringSeverity,
   FindingStatus,
@@ -68,7 +69,11 @@ export interface PhotoBlobRecord {
   thumbnail: Blob;
 }
 
-/** Coordinates are fractions (0–1) of the image's natural width and height. */
+/**
+ * Coordinates are fractions (0–1) of the original image's width and height
+ * (as recorded on the PhotoRecord), never screen or CSS pixels. A rectangle
+ * always lies fully inside the image: x + width ≤ 1 and y + height ≤ 1.
+ */
 export interface RectShape {
   kind: "rect";
   x: number;
@@ -90,7 +95,8 @@ export interface Annotation {
   inspectionId: ID;
   photoId: ID;
   shape: AnnotationShape;
-  label?: string;
+  /** Assigned by the inspector. */
+  label?: AnnotationLabel;
   provenance: Provenance;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;

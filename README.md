@@ -44,8 +44,10 @@ src/
     dashboard/         dashboard-specific sections
     inspections/       inspection form, list, overview
     photos/            photo gallery, upload, viewer
+    annotations/       annotation workspace: toolbar, SVG overlay, list
   hooks/               React hooks (client-side data loading)
   lib/
+    annotations/       pure geometry and zoom/pan maths (unit-tested)
     domain/            typed models, enumerations, validation (framework-independent)
     photos/            file validation, SHA-256, thumbnails (browser APIs, no React)
     storage/           IndexedDB wrapper and repositories (framework-independent)
@@ -66,3 +68,13 @@ shared between browsers or devices.
   It is never resized, recompressed or rotated; a separate 480 px JPEG thumbnail is used for galleries.
 - Metadata (`photos`) and image data (`photoBlobs`) are written and deleted in single transactions.
 - No capture date, GPS or other EXIF data is read or inferred.
+
+## Annotations
+
+- Rectangles and points drawn by the inspector on a photograph (select, move, resize, label, delete).
+- Stored in normalised image coordinates (0–1 of the original image's width and height), never screen
+  pixels, so they stay correct at any display size, zoom or pan. Shapes are clamped inside the image.
+- Labels (corrosion, coating damage, …) are assigned manually; they are not automated classifications.
+  Every annotation records `source: "manual"`, who recorded it, and when.
+- SVG overlay and browser pointer events (mouse, pen and touch); no graphics libraries.
+- Keyboard: `V` select, `R` rectangle, `P` point, `+`/`-` zoom, `0` reset view, `Esc` cancel/deselect.

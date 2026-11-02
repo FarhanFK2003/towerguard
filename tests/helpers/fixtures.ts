@@ -1,6 +1,6 @@
 import { IDBFactory } from "fake-indexeddb";
 import { afterEach, beforeEach, vi } from "vitest";
-import type { Inspection, PhotoRecord } from "@/lib/domain/types";
+import type { Annotation, Inspection, PhotoRecord } from "@/lib/domain/types";
 import { closeDatabase } from "@/lib/storage/db";
 import type { NewPhoto } from "@/lib/storage/photos";
 
@@ -42,6 +42,19 @@ export function makeNewPhoto(overrides: Partial<PhotoRecord> = {}): NewPhoto {
     record,
     original: new Blob([bytesWithSignature(SIGNATURES.jpeg, record.sizeBytes)], { type: record.mimeType }),
     thumbnail: new Blob([bytesWithSignature(SIGNATURES.jpeg, 16)], { type: "image/jpeg" }),
+  };
+}
+
+export function makeAnnotation(overrides: Partial<Annotation> = {}): Annotation {
+  return {
+    id: "ann-1",
+    inspectionId: "insp-1",
+    photoId: "photo-1",
+    shape: { kind: "rect", x: 0.1, y: 0.2, width: 0.3, height: 0.25 },
+    provenance: { source: "manual", recordedBy: "A. Inspector", recordedAt: "2026-10-30T10:00:00.000Z" },
+    createdAt: "2026-10-30T10:00:00.000Z",
+    updatedAt: "2026-10-30T10:00:00.000Z",
+    ...overrides,
   };
 }
 

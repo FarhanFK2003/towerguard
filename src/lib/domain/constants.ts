@@ -118,6 +118,34 @@ export const PHOTO_MIME_TYPE_LABELS: Record<PhotoMimeType, string> = {
 export const ANNOTATION_SHAPE_KINDS = ["rect", "point"] as const;
 export type AnnotationShapeKind = (typeof ANNOTATION_SHAPE_KINDS)[number];
 
+export const ANNOTATION_SHAPE_LABELS: Record<AnnotationShapeKind, string> = {
+  rect: "Rectangle",
+  point: "Point",
+};
+
+/**
+ * Labels the inspector may assign to an annotated region. They describe what
+ * the inspector marked; they are not automated classifications.
+ */
+export const ANNOTATION_LABELS = [
+  "corrosion",
+  "coating_damage",
+  "deformation",
+  "missing_component",
+  "connection_issue",
+  "other",
+] as const;
+export type AnnotationLabel = (typeof ANNOTATION_LABELS)[number];
+
+export const ANNOTATION_LABEL_NAMES: Record<AnnotationLabel, string> = {
+  corrosion: "Corrosion",
+  coating_damage: "Coating damage",
+  deformation: "Deformation",
+  missing_component: "Missing component",
+  connection_issue: "Connection issue",
+  other: "Other",
+};
+
 /** Returns true when `value` is one of the members of `options`. */
 export function isOneOf<T extends string>(options: readonly T[], value: unknown): value is T {
   return typeof value === "string" && (options as readonly string[]).includes(value);
