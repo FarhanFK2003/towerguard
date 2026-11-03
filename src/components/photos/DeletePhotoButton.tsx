@@ -20,6 +20,9 @@ export function DeletePhotoButton({ photo }: { photo: PhotoRecord }) {
     setError(null);
     try {
       await deletePhoto(photo.id);
+      // Reset before leaving: Next.js keeps this page mounted (hidden) after navigation.
+      setOpen(false);
+      setDeleting(false);
       router.replace(`/inspections/${photo.inspectionId}`);
     } catch (err) {
       setError(describeStorageError(err));
@@ -40,9 +43,12 @@ export function DeletePhotoButton({ photo }: { photo: PhotoRecord }) {
           <>
             <p>
               The original file <span className="font-medium text-slate-900">{photo.fileName}</span>, its thumbnail,
-              caption and viewpoint will be permanently removed from this browser.
+              caption, viewpoint and annotations will be permanently removed from this browser.
             </p>
-            <p className="mt-2">Other photographs are not affected. This cannot be undone.</p>
+            <p className="mt-2">
+              Findings that use this photograph as evidence are kept, but the photograph is unlinked from them. Other
+              photographs are not affected. This cannot be undone.
+            </p>
           </>
         }
         confirmLabel={deleting ? "Deleting…" : "Delete photograph"}

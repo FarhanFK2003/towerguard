@@ -37,7 +37,7 @@ npm run typecheck  # TypeScript, no emit
 
 ```
 src/
-  app/                 routes (App Router): /, /inspections/new, /inspections/[id]
+  app/                 routes (App Router): /, /inspections/new, /inspections/[id] (+ /photos, /findings)
   components/
     layout/            application shell, navigation, page header
     ui/                reusable primitives (Button, Badge, Card, Callout, Field, ConfirmDialog, …)
@@ -45,6 +45,7 @@ src/
     inspections/       inspection form, list, overview
     photos/            photo gallery, upload, viewer
     annotations/       annotation workspace: toolbar, SVG overlay, list
+    findings/          findings list, editor, evidence selector, summary
   hooks/               React hooks (client-side data loading)
   lib/
     annotations/       pure geometry and zoom/pan maths (unit-tested)
@@ -78,3 +79,17 @@ shared between browsers or devices.
   Every annotation records `source: "manual"`, who recorded it, and when.
 - SVG overlay and browser pointer events (mouse, pen and touch); no graphics libraries.
 - Keyboard: `V` select, `R` rectangle, `P` point, `+`/`-` zoom, `0` reset view, `Esc` cancel/deselect.
+
+## Findings
+
+- A finding is an inspection observation documented by the inspector (title, description, category,
+  inspector priority, status, component location, recommended action) with manual provenance. It is
+  not an automated prediction and carries no confidence score.
+- Status: *observation* (not yet reviewed), *confirmed* (reviewed and accepted by the inspector; **not**
+  an engineering certification), *dismissed*. Inspector priority is chosen explicitly and is separate
+  from engineering severity, which TowerGuard never sets (always "not assessed").
+- Evidence links reference photographs and annotations by permanent ID, and must belong to the same
+  inspection (checked in the same transaction as the save).
+- Deleting a finding never deletes photographs or annotations. Deleting a photograph removes its link
+  (and its annotations' links) from findings; deleting an annotation removes just that link. Findings
+  are kept, and damaged finding records are never modified.

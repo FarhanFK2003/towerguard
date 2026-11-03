@@ -1,8 +1,10 @@
 import { applyAnnotationPatch, isAnnotation, type AnnotationPatch } from "@/lib/domain/annotation";
+import { detachAnnotation } from "@/lib/domain/finding";
 import { isPhotoRecord } from "@/lib/domain/photo";
 import type { Annotation, ID } from "@/lib/domain/types";
 import { INDEXES, STORES, requestToPromise, withTransaction } from "./db";
 import { StorageError } from "./errors";
+import { pruneFindingEvidence } from "./findings";
 import type { DamagedRecord } from "./inspections";
 
 function annotationNotFound(id: ID): StorageError {
@@ -107,15 +109,35 @@ export async function updateAnnotation(id: ID, patch: AnnotationPatch, now: Date
   );
 }
 
+/**
+ * Deletes an annotation and, in the same transaction, unlinks it from any
+ * finding. The findings and their photograph links are kept.
+ */
 export async function deleteAnnotation(id: ID): Promise<void> {
   await withTransaction(
-    STORES.annotations,
+    [STORES.annotations, STORES.findings],
     "readwrite",
     async (tx) => {
       const store = tx.objectStore(STORES.annotations);
-      if ((await requestToPromise(store.getKey(id))) === undefined) throw annotationNotFound(id);
+      const existing = await requestToPromise<unknown>(store.get(id));
+      if (existing === undefined) throw annotationNotFound(id);
       await requestToPromise(store.delete(id));
+      const inspectionId = (existing as { inspectionId?: unknown }).inspectionId;
+      if (typeof inspectionId === "string") {
+        await pruneFindingEvidence(tx, inspectionId, (evidence) => detachAnnotation(evidence, id));
+      }
     },
     "The annotation could not be deleted.",
   );
+}
+
+/** All valid annotations of an inspection (for choosing finding evidence), oldest first. */
+export async function listAnnotationsForInspection(inspectionId: ID): Promise<Annotation[]> {
+  const records = await withTransaction(
+    STORES.annotations,
+    "readonly",
+    (tx) => requestToPromise<unknown[]>(tx.objectStore(STORES.annotations).index(INDEXES.byInspectionId).getAll(inspectionId)),
+    "Annotations could not be loaded.",
+  );
+  return records.filter(isAnnotation).sort(byCreation);
 }

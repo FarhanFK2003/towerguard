@@ -88,6 +88,12 @@ export function InspectionForm() {
     try {
       const record = createInspectionRecord(result.value);
       await createInspection(record);
+      // Next.js keeps this page mounted (hidden) after navigation; reset so the
+      // next "New inspection" starts empty and enabled.
+      setValues(EMPTY_VALUES);
+      setErrors({});
+      setSubmitted(false);
+      setSaving(false);
       router.push(`/inspections/${record.id}`);
     } catch (error) {
       setSaveError(describeStorageError(error));

@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { MapPin, Square, SquareDashedMousePointer, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/Button";
+import Link from "next/link";
+import { ListPlus, MapPin, Square, SquareDashedMousePointer, Trash2 } from "lucide-react";
+import { Button, buttonClasses } from "@/components/ui/Button";
 import { Callout } from "@/components/ui/Callout";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -142,14 +143,24 @@ export function AnnotationPanel({
                 </dd>
               </div>
             </dl>
-            <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(true)}>
-              <Trash2 aria-hidden="true" />
-              Delete annotation
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href={`/inspections/${photo.inspectionId}/findings/new?photo=${encodeURIComponent(photo.id)}&annotation=${encodeURIComponent(selected.id)}`}
+                className={buttonClasses({ size: "sm" })}
+                data-testid="create-finding-from-annotation"
+              >
+                <ListPlus aria-hidden="true" />
+                Create finding from annotation
+              </Link>
+              <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(true)}>
+                <Trash2 aria-hidden="true" />
+                Delete annotation
+              </Button>
+            </div>
             <ConfirmDialog
               open={confirmDelete}
               title={`Delete annotation #${selectedIndex + 1}?`}
-              description="The marked region and its label will be removed from this photograph. The photograph itself is not changed."
+              description="The marked region and its label will be removed from this photograph, and unlinked from any finding that uses it. The photograph and the findings themselves are kept."
               confirmLabel="Delete annotation"
               onConfirm={() => {
                 setConfirmDelete(false);

@@ -1,7 +1,9 @@
+import { detachPhoto } from "@/lib/domain/finding";
 import { isPhotoBlobRecord, isPhotoRecord, applyPhotoDetails, type PhotoDetails } from "@/lib/domain/photo";
 import type { ID, PhotoBlobRecord, PhotoRecord } from "@/lib/domain/types";
 import { INDEXES, STORES, requestToPromise, withTransaction } from "./db";
 import { StorageError } from "./errors";
+import { pruneFindingEvidence } from "./findings";
 import type { DamagedRecord } from "./inspections";
 
 function photoNotFound(id: ID): StorageError {
@@ -174,21 +176,30 @@ async function deleteAnnotationsForPhoto(tx: IDBTransaction, photoId: IDBValidKe
   return keys.length;
 }
 
+/** The inspection a stored photo record belongs to, even if the record is otherwise damaged. */
+function inspectionIdOf(record: unknown): ID | undefined {
+  const value = (record as { inspectionId?: unknown } | null | undefined)?.inspectionId;
+  return typeof value === "string" ? value : undefined;
+}
+
 /**
  * Deletes a photograph's metadata, image data and annotations in one
- * transaction. Other photographs are not affected.
+ * transaction, and removes it from the evidence of any finding (the findings
+ * are kept). Other photographs are not affected.
  */
 export async function deletePhoto(id: ID): Promise<void> {
   await withTransaction(
-    [STORES.photos, STORES.photoBlobs, STORES.annotations],
+    [STORES.photos, STORES.photoBlobs, STORES.annotations, STORES.findings],
     "readwrite",
     async (tx) => {
       const photos = tx.objectStore(STORES.photos);
-      const existing = await requestToPromise(photos.getKey(id));
+      const existing = await requestToPromise<unknown>(photos.get(id));
       if (existing === undefined) throw photoNotFound(id);
       await deleteAnnotationsForPhoto(tx, id);
       await requestToPromise(tx.objectStore(STORES.photoBlobs).delete(id));
       await requestToPromise(photos.delete(id));
+      const inspectionId = inspectionIdOf(existing);
+      if (inspectionId) await pruneFindingEvidence(tx, inspectionId, (evidence) => detachPhoto(evidence, id));
     },
     "The photograph could not be deleted.",
   );
@@ -196,11 +207,12 @@ export async function deletePhoto(id: ID): Promise<void> {
 
 /**
  * Deletes every photograph of an inspection (metadata, image data and their
- * annotations) in one transaction. The inspection itself is kept.
+ * annotations) in one transaction, removing them from the inspection's
+ * findings. The inspection and its findings are kept.
  */
 export async function deletePhotosForInspection(inspectionId: ID): Promise<number> {
   return withTransaction(
-    [STORES.photos, STORES.photoBlobs, STORES.annotations],
+    [STORES.photos, STORES.photoBlobs, STORES.annotations, STORES.findings],
     "readwrite",
     async (tx) => {
       const photos = tx.objectStore(STORES.photos);
@@ -214,6 +226,8 @@ export async function deletePhotosForInspection(inspectionId: ID): Promise<numbe
         ...blobKeys.map((key) => requestToPromise(blobs.delete(key))),
         ...photoKeys.map((key) => requestToPromise(photos.delete(key))),
       ]);
+      const removed = new Set(photoKeys.map(String));
+      await pruneFindingEvidence(tx, inspectionId, (evidence) => evidence.filter((l) => !removed.has(l.photoId)));
       return photoKeys.length;
     },
     "The photographs could not be deleted.",

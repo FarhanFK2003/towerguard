@@ -20,6 +20,9 @@ export function DeleteInspectionButton({ inspection }: { inspection: Inspection 
     setError(null);
     try {
       await deleteInspection(inspection.id);
+      // Reset before leaving: Next.js keeps this page mounted (hidden) after navigation.
+      setOpen(false);
+      setDeleting(false);
       router.replace("/");
     } catch (err) {
       setError(describeStorageError(err));

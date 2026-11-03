@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, type ReactNode } from "react";
 import { LoaderCircle } from "lucide-react";
 import { Button } from "./Button";
 import { Callout } from "./Callout";
@@ -40,6 +40,16 @@ export function ConfirmDialog({
     if (open && !dialog.open) dialog.showModal();
     if (!open && dialog.open) dialog.close();
   }, [open]);
+
+  // Next.js keeps visited pages mounted but hidden (React Activity). A modal left
+  // open in a hidden page would keep the visible page inert, so close it when the
+  // page is hidden; the effect above reopens it if still requested when shown again.
+  useLayoutEffect(() => {
+    const dialog = ref.current;
+    return () => {
+      if (dialog?.open) dialog.close();
+    };
+  }, []);
 
   return (
     <dialog

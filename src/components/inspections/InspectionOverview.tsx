@@ -2,8 +2,9 @@
 
 import { useCallback, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { ClipboardList, HardDrive, Info, ListChecks, RotateCw, SearchX } from "lucide-react";
+import { ClipboardList, HardDrive, Info, RotateCw, SearchX } from "lucide-react";
 import { StorageStatus } from "@/components/dashboard/StorageStatus";
+import { FindingsSummaryCard } from "@/components/findings/FindingsSummaryCard";
 import { BackLink } from "@/components/layout/BackLink";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PhotoGallery } from "@/components/photos/PhotoGallery";
@@ -133,16 +134,7 @@ function InspectionDetails({ inspection }: { inspection: Inspection }) {
         </div>
 
         <div className="space-y-6">
-          <Card>
-            <CardHeader
-              title="Observations & findings"
-              description="Recorded and reviewed by the inspector."
-              icon={<ListChecks />}
-            />
-            <CardBody>
-              <p className="text-sm text-slate-500">No observations recorded.</p>
-            </CardBody>
-          </Card>
+          <FindingsSummaryCard inspectionId={inspection.id} />
 
           <Card>
             <CardHeader title="Record" icon={<Info />} />

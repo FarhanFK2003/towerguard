@@ -114,18 +114,28 @@ async function evaluate(expression) {
 
 async function waitFor(expression, label, timeoutMs = 30000) {
   const start = Date.now();
+  let lastError = "";
   while (Date.now() - start < timeoutMs) {
     try {
       if (await evaluate(expression)) return;
-    } catch {
-      // Page mid-navigation; retry.
+      lastError = "";
+    } catch (error) {
+      lastError = error.message; // page mid-navigation, or a broken expression; retry
     }
     await delay(200);
   }
-  throw new Error(`Timed out waiting for: ${label}`);
+  throw new Error(`Timed out waiting for: ${label}${lastError ? ` (last error: ${lastError.split("\n")[0]})` : ""}`);
 }
 
 const bodyHas = (text) => `document.body.innerText.includes(${JSON.stringify(text)})`;
+
+/**
+ * Visible matches only. With Cache Components, Next.js keeps up to three
+ * visited routes mounted but hidden (React Activity, `display: none`), so plain
+ * DOM queries can match elements from pages the user is no longer on.
+ */
+const visibleAll = (selector) =>
+  `[...document.querySelectorAll(${JSON.stringify(selector)})].filter((e) => e.checkVisibility())`;
 
 async function navigate(path) {
   await send("Page.navigate", { url: baseUrl + path });
@@ -356,11 +366,11 @@ const readPhotoState = `Promise.all([
 })`;
 
 const uploadsSettled = (count) =>
-  `(() => { const items = [...document.querySelectorAll("[data-upload-status]")];
+  `(() => { const items = ${visibleAll("[data-upload-status]")};
     return items.length === ${count} && items.every((li) => ["saved", "rejected", "failed"].includes(li.dataset.uploadStatus)); })()`;
-const galleryCount = `document.querySelectorAll('ul[aria-label="Photographs"] > li').length`;
+const galleryCount = `${visibleAll('ul[aria-label="Photographs"] > li')}.length`;
 const galleryImagesLoaded = (count) =>
-  `(() => { const imgs = [...document.querySelectorAll('ul[aria-label="Photographs"] img')];
+  `(() => { const imgs = ${visibleAll('ul[aria-label="Photographs"] img')};
     return imgs.length === ${count} && imgs.every((img) => img.complete && img.naturalWidth > 0); })()`;
 
 async function photoEvidence() {
@@ -546,10 +556,10 @@ async function photoEvidence() {
 
 // ---- Annotation workspace -------------------------------------------------
 
-const STAGE_IMG = `document.querySelector('[data-testid="annotation-stage"] img')`;
+const STAGE_IMG = `${visibleAll('[data-testid="annotation-stage"] img')}[0]`;
 const readAnnotations = withStore("annotations", "readonly", `const r = store.getAll(); r.onsuccess = () => { result = r.result; };`);
-const listCount = `document.querySelectorAll("[data-annotation-item]").length`;
-const saved = `document.querySelector('[data-testid="save-status"]')?.dataset.saveStatus === "saved"`;
+const listCount = `${visibleAll("[data-annotation-item]")}.length`;
+const saved = `${visibleAll('[data-testid="save-status"]')}[0]?.dataset.saveStatus === "saved"`;
 
 /** Screen position of a normalised image point, using the image's current on-screen rect. */
 async function imagePoint(fx, fy) {
@@ -744,7 +754,7 @@ async function annotationWorkspace() {
   // 11–12. Delete an annotation (explicit confirmation), then check it stays deleted.
   await evaluate(`document.querySelector('[data-annotation-item="${point.id}"]').click()`);
   await waitFor(`!!document.querySelector('[data-testid="annotation-details"]')`, "details");
-  await evaluate(`[...document.querySelectorAll('[data-testid="annotation-details"] > button')].find(b => b.textContent.includes("Delete annotation")).click()`);
+  await evaluate(`[...document.querySelectorAll('[data-testid="annotation-details"] button')].find(b => b.textContent.includes("Delete annotation")).click()`);
   await waitFor(`!!document.querySelector("dialog[open]")`, "delete dialog");
   record("Deleting asks for explicit confirmation", (await evaluate(readAnnotations)).length === 2);
   await evaluate(`[...document.querySelectorAll("dialog[open] button")].find(b => b.textContent.includes("Delete annotation")).click()`);
@@ -775,6 +785,276 @@ async function annotationWorkspace() {
   record("Deleting the photograph also removes its annotations", (await evaluate(readAnnotations)).length === 0);
 }
 
+// ---- Findings -------------------------------------------------------------
+
+/** First visible element matching `selector` (see `visibleAll`). */
+const el = (selector) => `${visibleAll(selector)}[0]`;
+const elByText = (selector, text) =>
+  `${visibleAll(selector)}.find((e) => e.textContent.trim().includes(${JSON.stringify(text)}))`;
+const readFindings = withStore("findings", "readonly", `const r = store.getAll(); r.onsuccess = () => { result = r.result; };`);
+
+/** A genuine mouse click at the element's on-screen centre (scrolled into view first). */
+async function realClick(elementExpression) {
+  await evaluate(`(${elementExpression}).scrollIntoView({ block: "center" })`);
+  await delay(80);
+  const c = await evaluate(`(() => { const r = (${elementExpression}).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: c.x, y: c.y, buttons: 0 });
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x: c.x, y: c.y, button: "left", buttons: 1, clickCount: 1 });
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: c.x, y: c.y, button: "left", buttons: 0, clickCount: 1 });
+}
+
+/** Clicks into a field and types (genuine browser text input). `replace` selects all first. */
+async function typeInto(selector, text, replace = false) {
+  await realClick(el(selector));
+  if (replace) {
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: "a", code: "KeyA", modifiers: 2, commands: ["selectAll"] });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", modifiers: 2 });
+  }
+  await send("Input.insertText", { text });
+}
+
+/** SIMULATED: sets a native <select> (headless pop-up lists can't be driven by the mouse). */
+async function chooseOption(selector, value) {
+  await evaluate(`(() => { const s = ${el(selector)};
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(s, ${JSON.stringify(value)});
+    s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+}
+
+const findingsOf = async (inspectionId) => (await evaluate(readFindings)).filter((f) => f.inspectionId === inspectionId);
+const isChecked = (annotationId) => evaluate(`!!${el(`[data-evidence-annotation="${annotationId}"]`)}?.checked`);
+
+async function findingsWorkflow() {
+  // 1. Create an inspection through the form.
+  await navigate("/inspections/new");
+  await waitFor(`!!${el("#inspection-siteId")}`, "inspection form");
+  await typeInto("#inspection-siteId", "TWR-FIND-01");
+  await typeInto("#inspection-siteName", "Findings Test Mast");
+  await chooseOption("#inspection-structureType", "monopole");
+  await typeInto("#inspection-inspectorName", "Field Inspector");
+  await realClick(elByText("button", "Use today"));
+  await realClick(elByText("button", "Create inspection"));
+  await waitFor(`/^\\/inspections\\/[0-9a-f-]{36}$/.test(location.pathname)`, "inspection created");
+  const inspectionId = await evaluate(`location.pathname.split("/").pop()`);
+  record("Findings: inspection created through the form (typed input, mouse clicks)", true, inspectionId);
+
+  // Regression: the creation form is kept mounted (hidden) by Next.js; it must come back empty.
+  await realClick(elByText("nav a", "New inspection"));
+  await waitFor(`location.pathname === "/inspections/new" && !!${el("#inspection-siteId")}`, "new inspection again");
+  record(
+    "Returning to New inspection after creating one shows an empty, enabled form",
+    (await evaluate(`${el("#inspection-siteId")}.value === "" && ${el("#inspection-siteName")}.value === "" && !${elByText("button", "Create inspection")}.disabled`)),
+  );
+  await navigate(`/inspections/${inspectionId}`);
+
+  // 2. Upload two photographs.
+  await waitFor(bodyHas("No photographs yet"), "gallery");
+  await setInputFiles('input[type="file"]', [fixture("tower-north-face.jpg"), fixture("tower-leg-b.png")]);
+  await waitFor(`${uploadsSettled(2)} && ${galleryImagesLoaded(2)}`, "two uploads");
+  const photos = (await evaluate(readPhotoState)).photos.filter((p) => p.inspectionId === inspectionId);
+  const jpg = photos.find((p) => p.fileName.endsWith(".jpg"));
+  const png = photos.find((p) => p.fileName.endsWith(".png"));
+  record("Findings: two photographs uploaded", Boolean(jpg && png));
+
+  // 3. Annotations: two rectangles on the JPEG, one point on the PNG (mouse).
+  await realClick(el(`a[data-photo-id="${jpg.id}"]`));
+  await waitFor(`${STAGE_IMG}?.complete && ${STAGE_IMG}.naturalWidth > 0`, "jpg workspace");
+  await evaluate(`${el('[data-testid="annotation-viewport"]')}.scrollIntoView({ block: "center" })`);
+  await realClick(elByText('[role="toolbar"] button', "Rectangle"));
+  await mouseDrag(await imagePoint(0.1, 0.2), await imagePoint(0.3, 0.45));
+  await waitFor(`${listCount} === 1 && ${saved}`, "rect 1");
+  await mouseDrag(await imagePoint(0.55, 0.5), await imagePoint(0.8, 0.75));
+  await waitFor(`${listCount} === 2 && ${saved}`, "rect 2");
+  await navigate(`/inspections/${inspectionId}/photos/${png.id}`);
+  await waitFor(`${STAGE_IMG}?.complete && ${STAGE_IMG}.naturalWidth > 0`, "png workspace");
+  await evaluate(`${el('[data-testid="annotation-viewport"]')}.scrollIntoView({ block: "center" })`);
+  await realClick(elByText('[role="toolbar"] button', "Point"));
+  const pt = await imagePoint(0.6, 0.4);
+  await mouseDrag(pt, pt, 1);
+  await waitFor(`${listCount} === 1 && ${saved}`, "png point");
+  const anns = (await evaluate(readAnnotations)).filter((a) => a.inspectionId === inspectionId).sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+  const [r1, r2] = anns.filter((a) => a.photoId === jpg.id);
+  const p1 = anns.find((a) => a.photoId === png.id);
+  record("Findings: annotations drawn (2 rectangles, 1 point) with the mouse", Boolean(r1 && r2 && p1));
+
+  // 4–5. Create a finding from an annotation: photograph and annotation pre-linked.
+  await navigate(`/inspections/${inspectionId}/photos/${jpg.id}`);
+  await waitFor(`${listCount} === 2`, "jpg annotations listed");
+  await realClick(el(`[data-annotation-item="${r1.id}"]`));
+  await realClick(el('[data-testid="create-finding-from-annotation"]'));
+  await waitFor(`location.pathname.endsWith("/findings/new") && !!${el(`[data-evidence-photo="${jpg.id}"]`)}`, "new finding with evidence");
+  record(
+    "Create finding from annotation pre-links the photograph and exactly that annotation",
+    (await isChecked(r1.id)) && !(await isChecked(r2.id)) && (await evaluate(`document.querySelectorAll("[data-evidence-photo]").length`)) === 1,
+  );
+  await typeInto("#finding-title", "Corrosion on lower bracing");
+  await typeInto("#finding-description", "Surface rust with coating loss on the lower bracing members.");
+  await typeInto("#finding-componentLocation", "Leg B, section 2");
+  await chooseOption("#finding-category", "corrosion");
+  await realClick(el('[data-choice="priority:high"]'));
+  await realClick(elByText("button", "Create finding"));
+  await waitFor(`/\\/findings\\/[0-9a-f-]{36}$/.test(location.pathname)`, "finding 1 saved");
+  const f1Id = await evaluate(`location.pathname.split("/").pop()`);
+  let f1 = (await findingsOf(inspectionId)).find((f) => f.id === f1Id);
+  record(
+    "Saved finding links the annotation by permanent ID, with manual provenance and no engineering rating",
+    JSON.stringify(f1.evidence) === JSON.stringify([{ photoId: jpg.id, annotationIds: [r1.id] }]) &&
+      f1.provenance.source === "manual" && f1.provenance.recordedBy === "Field Inspector" &&
+      f1.engineeringSeverity === "not_assessed" && f1.inspectorPriority === "high" && f1.status === "observation" && !f1.review &&
+      !("confidence" in f1),
+    JSON.stringify(f1.evidence),
+  );
+
+  // 6–8. Create a finding directly from the inspection; attach two photos and several annotations.
+  await navigate(`/inspections/${inspectionId}`);
+  await waitFor(`!!${el('[data-testid="findings-summary"]')}`, "summary card");
+  await realClick(`${el('[data-testid="findings-summary"]')}.querySelector('a[href$="/findings/new"]')`);
+  await waitFor(`location.pathname.endsWith("/findings/new") && ${bodyHas("No evidence linked yet")}`, "empty new finding");
+  record(
+    "New finding from the inspection starts empty (no stale values) without evidence, and prompts to link some",
+    await evaluate(`${el("#finding-title")}.value === "" && ${el("#finding-description")}.value === ""`),
+  );
+  await typeInto("#finding-title", "Loose fastener at platform bracket");
+  await typeInto("#finding-description", "Nut backed off on the platform support bracket.");
+  await chooseOption("#finding-category", "loose_fastener");
+  await realClick(el('[data-choice="priority:medium"]'));
+  await realClick(el(`[data-attach-photo="${jpg.id}"]`));
+  await waitFor(`!!${el(`[data-evidence-annotation="${r2.id}"]`)}`, "jpg attached");
+  await realClick(el(`[data-evidence-annotation="${r1.id}"]`));
+  await realClick(el(`[data-evidence-annotation="${r2.id}"]`));
+  await realClick(el(`[data-attach-photo="${png.id}"]`));
+  await waitFor(`!!${el(`[data-evidence-annotation="${p1.id}"]`)}`, "png attached");
+  await realClick(el(`[data-evidence-annotation="${p1.id}"]`));
+  await screenshot("18-finding-evidence-editor");
+  await realClick(elByText("button", "Create finding"));
+  await waitFor(`/\\/findings\\/[0-9a-f-]{36}$/.test(location.pathname)`, "finding 2 saved");
+  const f2Id = await evaluate(`location.pathname.split("/").pop()`);
+  let f2 = (await findingsOf(inspectionId)).find((f) => f.id === f2Id);
+  record(
+    "Finding links multiple photographs and multiple annotations on one photograph",
+    JSON.stringify(f2.evidence) === JSON.stringify([{ photoId: jpg.id, annotationIds: [r1.id, r2.id] }, { photoId: png.id, annotationIds: [p1.id] }]),
+    JSON.stringify(f2.evidence),
+  );
+
+  // 9–10. Edit: title, priority and status (with the confirmed explanation shown).
+  await typeInto("#finding-title", "Loose fastener at platform bracket (re-checked)", true);
+  await realClick(el('[data-choice="priority:urgent"]'));
+  await realClick(el('[data-choice="status:confirmed"]'));
+  record("Status choices explain that confirmed is not an engineering certification", await evaluate(bodyHas("Reviewed and accepted by the inspector. This is not an engineering certification.")));
+  await realClick(elByText("button", "Save changes"));
+  await waitFor(`${bodyHas("Saved")} && !!${el('[data-testid="finding-review"]')}`, "edit saved");
+  f2 = (await findingsOf(inspectionId)).find((f) => f.id === f2Id);
+  record(
+    "Edit saves title, priority and status; confirmation records the reviewer; engineering rating unchanged",
+    f2.title === "Loose fastener at platform bracket (re-checked)" && f2.inspectorPriority === "urgent" && f2.status === "confirmed" &&
+      f2.review?.reviewedBy === "Field Inspector" && f2.engineeringSeverity === "not_assessed",
+  );
+
+  // 12. Remove evidence without deleting the photograph.
+  await realClick(el(`[data-remove-photo="${png.id}"]`));
+  await realClick(elByText("button", "Save changes"));
+  await waitFor(`!${el(`[data-evidence-photo="${png.id}"]`)}`, "png evidence row removed");
+  await waitFor(bodyHas("Saved"), "evidence removal saved");
+  f2 = (await findingsOf(inspectionId)).find((f) => f.id === f2Id);
+  const photosAfter = (await evaluate(readPhotoState)).photos.map((p) => p.id);
+  const annsAfter = (await evaluate(readAnnotations)).map((a) => a.id);
+  record(
+    "Removing evidence unlinks the photograph but keeps the photograph and its annotation",
+    JSON.stringify(f2.evidence) === JSON.stringify([{ photoId: jpg.id, annotationIds: [r1.id, r2.id] }]) &&
+      photosAfter.includes(png.id) && annsAfter.includes(p1.id),
+  );
+  await screenshot("19-finding-detail");
+
+  // 11. Filters on the findings page.
+  await navigate(`/inspections/${inspectionId}/findings`);
+  await waitFor(`${el('[data-testid="findings-count"]')}?.textContent === "Showing 2 of 2 findings"`, "findings list");
+  const visibleIds = () => evaluate(`[...document.querySelectorAll("[data-finding-id]")].map((a) => a.dataset.findingId)`);
+  await chooseOption("#filter-priority", "urgent");
+  await waitFor(`${el('[data-testid="findings-count"]')}.textContent === "Showing 1 of 2 findings"`, "priority filter");
+  const urgentOnly = await visibleIds();
+  await chooseOption("#filter-status", "observation");
+  await waitFor(bodyHas("No findings match these filters."), "no match");
+  await realClick(elByText("button", "Clear filters"));
+  await chooseOption("#filter-category", "corrosion");
+  await waitFor(`${el('[data-testid="findings-count"]')}.textContent === "Showing 1 of 2 findings"`, "category filter");
+  const corrosionOnly = await visibleIds();
+  record(
+    "Filters by priority, status and category (combined and cleared)",
+    JSON.stringify(urgentOnly) === JSON.stringify([f2Id]) && JSON.stringify(corrosionOnly) === JSON.stringify([f1Id]),
+  );
+  record(
+    "List shows category, priority, status, component location, evidence count and created date",
+    await evaluate(`(() => { const row = ${el(`[data-finding-id="${f1Id}"]`)}.innerText;
+      return ["Corrosion on lower bracing", "Corrosion", "High priority", "Observation", "Leg B, section 2", "1 photo, 1 annotation", String(new Date().getFullYear())]
+        .every((text) => row.includes(text)); })()`),
+  );
+  await realClick(elByText("button", "Clear filters"));
+
+  // Overview summary counts.
+  await navigate(`/inspections/${inspectionId}`);
+  await waitFor(`!!${el('[data-summary-status="confirmed"]')}`, "summary counts");
+  const summary = await evaluate(`Object.fromEntries([...document.querySelectorAll("[data-summary-status],[data-summary-priority]")].map((li) => [li.dataset.summaryStatus ?? li.dataset.summaryPriority, li.textContent.match(/(\\d+)$/)?.[1]]))`);
+  record(
+    "Overview summary counts findings by status and priority",
+    summary.observation === "1" && summary.confirmed === "1" && summary.dismissed === "0" && summary.urgent === "1" && summary.high === "1",
+    JSON.stringify(summary),
+  );
+
+  // Deleting an annotation unlinks it from findings (findings kept).
+  await navigate(`/inspections/${inspectionId}/photos/${jpg.id}`);
+  await waitFor(`${listCount} === 2`, "annotations listed");
+  await realClick(el(`[data-annotation-item="${r2.id}"]`));
+  await realClick(elByText('[data-testid="annotation-details"] button', "Delete annotation"));
+  await waitFor(`!!${el("dialog[open]")}`, "annotation delete dialog");
+  await realClick(elByText("dialog[open] button", "Delete annotation"));
+  await waitFor(`${listCount} === 1 && ${saved}`, "annotation deleted");
+  f2 = (await findingsOf(inspectionId)).find((f) => f.id === f2Id);
+  record(
+    "Deleting an annotation removes it from the finding's evidence; the finding and photo link remain",
+    JSON.stringify(f2.evidence) === JSON.stringify([{ photoId: jpg.id, annotationIds: [r1.id] }]),
+  );
+
+  // 13. Delete a finding; photographs and annotations stay.
+  await navigate(`/inspections/${inspectionId}/findings/${f1Id}`);
+  await waitFor(`!!${elByText("button", "Delete")}`, "finding 1 page");
+  await realClick(elByText("form button", "Delete"));
+  await waitFor(`!!${el("dialog[open]")}`, "finding delete dialog");
+  await realClick(elByText("dialog[open] button", "Delete finding"));
+  await waitFor(`location.pathname === "/inspections/${inspectionId}/findings"`, "back to list");
+  const remaining = await findingsOf(inspectionId);
+  record(
+    "Deleting a finding removes only the finding, not its photograph or annotation",
+    remaining.length === 1 && remaining[0].id === f2Id &&
+      (await evaluate(readPhotoState)).photos.some((p) => p.id === jpg.id) &&
+      (await evaluate(readAnnotations)).some((a) => a.id === r1.id),
+  );
+
+  // Regression: the delete dialog closed before navigating, so the page stays clickable with a real mouse.
+  await realClick(elByText("main a", "New finding"));
+  await waitFor(`location.pathname.endsWith("/findings/new")`, "page interactive after delete");
+  record("After deleting a finding, the page remains interactive (real mouse click navigates)", true);
+  await navigate(`/inspections/${inspectionId}/findings`);
+
+  // 14. Refresh: everything persists.
+  await reload();
+  await waitFor(`${el('[data-testid="findings-count"]')}?.textContent === "Showing 1 of 1 finding"`, "list after reload");
+  record("After refresh the remaining finding and its edits persist", await evaluate(bodyHas("Loose fastener at platform bracket (re-checked)")));
+
+  // 15. 390 px width.
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await reload();
+  await waitFor(`!!${el("[data-finding-id]")}`, "mobile list");
+  await delay(300);
+  const listOverflow = await evaluate(`document.documentElement.scrollWidth > window.innerWidth`);
+  await screenshot("20-findings-list-mobile");
+  await navigate(`/inspections/${inspectionId}/findings/${f2Id}`);
+  await waitFor(`!!${el(`[data-evidence-photo="${jpg.id}"]`)}`, "mobile finding");
+  await delay(300);
+  const detailOverflow = await evaluate(`document.documentElement.scrollWidth > window.innerWidth`);
+  await screenshot("21-finding-detail-mobile");
+  await send("Emulation.clearDeviceMetricsOverride");
+  record("Findings list and finding page at 390px: no horizontal overflow", !listOverflow && !detailOverflow, `list=${listOverflow} detail=${detailOverflow}`);
+}
+
 try {
   await send("Page.enable");
   await send("Runtime.enable");
@@ -782,6 +1062,7 @@ try {
   await damagedRecords();
   await photoEvidence();
   await annotationWorkspace();
+  await findingsWorkflow();
 } catch (error) {
   record("Browser run aborted", false, error.message);
   try {

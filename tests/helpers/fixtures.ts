@@ -1,6 +1,6 @@
 import { IDBFactory } from "fake-indexeddb";
 import { afterEach, beforeEach, vi } from "vitest";
-import type { Annotation, Inspection, PhotoRecord } from "@/lib/domain/types";
+import type { Annotation, Finding, Inspection, PhotoRecord } from "@/lib/domain/types";
 import { closeDatabase } from "@/lib/storage/db";
 import type { NewPhoto } from "@/lib/storage/photos";
 
@@ -54,6 +54,24 @@ export function makeAnnotation(overrides: Partial<Annotation> = {}): Annotation 
     provenance: { source: "manual", recordedBy: "A. Inspector", recordedAt: "2026-10-30T10:00:00.000Z" },
     createdAt: "2026-10-30T10:00:00.000Z",
     updatedAt: "2026-10-30T10:00:00.000Z",
+    ...overrides,
+  };
+}
+
+export function makeFinding(overrides: Partial<Finding> = {}): Finding {
+  return {
+    id: "finding-1",
+    inspectionId: "insp-1",
+    title: "Corrosion at leg B splice",
+    description: "Surface rust with flaking coating around the splice plate bolts.",
+    category: "corrosion",
+    inspectorPriority: "medium",
+    engineeringSeverity: "not_assessed",
+    status: "observation",
+    evidence: [],
+    provenance: { source: "manual", recordedBy: "A. Inspector", recordedAt: "2026-10-30T11:00:00.000Z" },
+    createdAt: "2026-10-30T11:00:00.000Z",
+    updatedAt: "2026-10-30T11:00:00.000Z",
     ...overrides,
   };
 }
