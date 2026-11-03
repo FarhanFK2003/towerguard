@@ -2,9 +2,23 @@
 
 import { useCallback, useState } from "react";
 import Link from "next/link";
-import { CalendarDays, ChevronRight, ListChecks, MapPin, Paperclip, Plus, RotateCw, SearchX } from "lucide-react";
+import {
+  ArrowRight,
+  CalendarDays,
+  ChevronRight,
+  Clock,
+  ListChecks,
+  MapPin,
+  Paperclip,
+  Plus,
+  RotateCw,
+  SearchX,
+  TriangleAlert,
+} from "lucide-react";
+import { ReadOnlyBanner } from "@/components/inspections/ReadOnlyBanner";
 import { BackLink } from "@/components/layout/BackLink";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { Badge } from "@/components/ui/Badge";
 import { Button, buttonClasses } from "@/components/ui/Button";
 import { Callout } from "@/components/ui/Callout";
 import { Card } from "@/components/ui/Card";
@@ -21,7 +35,14 @@ import {
   INSPECTOR_PRIORITY_LABELS,
   isOneOf,
 } from "@/lib/domain/constants";
-import { evidenceCounts, filterFindings, type FindingFilters } from "@/lib/domain/finding";
+import {
+  evidenceCounts,
+  filterFindings,
+  needsReview,
+  nextFindingNeedingReview,
+  reviewState,
+  type FindingFilters,
+} from "@/lib/domain/finding";
 import type { ID } from "@/lib/domain/types";
 import { formatTimestamp } from "@/lib/format";
 import { describeStorageError } from "@/lib/storage/errors";
@@ -107,20 +128,34 @@ export function FindingsList({ inspectionId }: { inspectionId: ID }) {
   }
 
   const visible = filterFindings(findings, filters);
-  const filtered = Boolean(filters.category || filters.priority || filters.status);
+  const filtered = Boolean(filters.category || filters.priority || filters.status || filters.needsReview);
+  const readOnly = inspection.status === "finalised";
+  const needingReview = findings.filter(needsReview).length;
+  const next = nextFindingNeedingReview(findings);
 
   return (
     <div className="space-y-6">
       <BackLink href={`/inspections/${inspectionId}`}>Inspection</BackLink>
+      <ReadOnlyBanner inspection={inspection} />
       <PageHeader
         eyebrow={`${inspection.siteName} (${inspection.siteId})`}
         title="Findings"
         description="Inspection observations documented by the inspector, linked to photographic evidence."
         actions={
-          <Link href={`${base}/new`} className={buttonClasses()}>
-            <Plus aria-hidden="true" />
-            New finding
-          </Link>
+          <>
+            {next ? (
+              <Link href={`${base}/${next.id}`} className={buttonClasses({ variant: "secondary" })} data-testid="next-needing-review">
+                Next finding needing review
+                <ArrowRight aria-hidden="true" />
+              </Link>
+            ) : null}
+            {readOnly ? null : (
+              <Link href={`${base}/new`} className={buttonClasses()}>
+                <Plus aria-hidden="true" />
+                New finding
+              </Link>
+            )}
+          </>
         }
       />
 
@@ -161,6 +196,16 @@ export function FindingsList({ inspectionId }: { inspectionId: ID }) {
             onChange={(v) => setFilters((f) => ({ ...f, status: isOneOf(FINDING_STATUSES, v) ? v : undefined }))}
             options={FINDING_STATUSES.map((s) => ({ value: s, label: FINDING_STATUS_LABELS[s] }))}
           />
+          <Button
+            variant={filters.needsReview ? "primary" : "secondary"}
+            aria-pressed={Boolean(filters.needsReview)}
+            data-testid="filter-needs-review"
+            title="Unreviewed observations, reviews that are out of date, and reviews with missing details"
+            onClick={() => setFilters((f) => ({ ...f, needsReview: !f.needsReview }))}
+          >
+            <Clock aria-hidden="true" />
+            Needs review ({needingReview})
+          </Button>
           {filtered ? (
             <Button variant="ghost" size="sm" onClick={() => setFilters({})}>
               Clear filters
@@ -176,12 +221,18 @@ export function FindingsList({ inspectionId }: { inspectionId: ID }) {
             <EmptyState
               icon={<ListChecks />}
               title="No findings yet"
-              description="Create a finding here, or select an annotation on a photograph and choose “Create finding from annotation”."
+              description={
+                readOnly
+                  ? "No findings were recorded before this inspection was finalised."
+                  : "Create a finding here, or select an annotation on a photograph and choose “Create finding from annotation”."
+              }
               action={
-                <Link href={`${base}/new`} className={buttonClasses()}>
-                  <Plus aria-hidden="true" />
-                  New finding
-                </Link>
+                readOnly ? undefined : (
+                  <Link href={`${base}/new`} className={buttonClasses()}>
+                    <Plus aria-hidden="true" />
+                    New finding
+                  </Link>
+                )
               }
             />
           </div>
@@ -191,11 +242,13 @@ export function FindingsList({ inspectionId }: { inspectionId: ID }) {
           <ul className="divide-y divide-slate-200" aria-label="Findings">
             {visible.map((finding) => {
               const counts = evidenceCounts(finding.evidence);
+              const review = reviewState(finding);
               return (
                 <li key={finding.id}>
                   <Link
                     href={`${base}/${finding.id}`}
                     data-finding-id={finding.id}
+                    data-review-state={review}
                     className="group flex items-start gap-3 px-5 py-4 transition-colors hover:bg-slate-50 focus-visible:bg-slate-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-amber-500"
                   >
                     <div className="min-w-0 flex-1 space-y-1.5">
@@ -203,6 +256,15 @@ export function FindingsList({ inspectionId }: { inspectionId: ID }) {
                       <div className="flex flex-wrap gap-1.5">
                         <PriorityBadge priority={finding.inspectorPriority} />
                         <FindingStatusBadge status={finding.status} />
+                        {review === "stale" ? (
+                          <Badge tone="warning" icon={<TriangleAlert aria-hidden="true" />}>
+                            Edited after review
+                          </Badge>
+                        ) : review !== "current" ? (
+                          <Badge tone="warning" icon={<Clock aria-hidden="true" />}>
+                            Needs review
+                          </Badge>
+                        ) : null}
                       </div>
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
                         <span>{DEFECT_CATEGORY_LABELS[finding.category]}</span>

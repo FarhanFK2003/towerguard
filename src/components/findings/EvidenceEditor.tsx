@@ -43,23 +43,32 @@ export function EvidenceEditor({
   annotationsByPhoto,
   evidence,
   onChange,
-  disabled,
+  disabled: busy,
+  readOnly = false,
 }: {
   photos: readonly PhotoRecord[];
   annotationsByPhoto: ReadonlyMap<ID, readonly Annotation[]>;
   evidence: readonly EvidenceLink[];
   onChange: (evidence: EvidenceLink[]) => void;
+  /** Temporarily disabled (e.g. while saving). */
   disabled?: boolean;
+  /** Finalised inspection: show the linked evidence only, with no attach/remove controls. */
+  readOnly?: boolean;
 }) {
+  const disabled = busy || readOnly;
   const attachedIds = new Set(evidence.map((l) => l.photoId));
   const available = photos.filter((p) => !attachedIds.has(p.id));
 
   return (
     <div className="space-y-4">
       {evidence.length === 0 ? (
-        <Callout tone="info" title="No evidence linked yet">
-          Attach the photographs, and the annotated regions on them, that support this finding.
-        </Callout>
+        readOnly ? (
+          <p className="text-sm text-slate-500">No evidence was linked to this finding.</p>
+        ) : (
+          <Callout tone="info" title="No evidence linked yet">
+            Attach the photographs, and the annotated regions on them, that support this finding.
+          </Callout>
+        )
       ) : (
         <ul className="space-y-3" aria-label="Linked evidence">
           {evidence.map((link) => {
@@ -89,17 +98,19 @@ export function EvidenceEditor({
                         : `${link.annotationIds.length} annotation${link.annotationIds.length === 1 ? "" : "s"} linked`}
                     </p>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={disabled}
-                    data-remove-photo={link.photoId}
-                    aria-label={`Remove ${photo?.fileName ?? "photograph"} from this finding`}
-                    onClick={() => onChange(detachPhoto(evidence, link.photoId))}
-                  >
-                    <X aria-hidden="true" />
-                    Remove
-                  </Button>
+                  {readOnly ? null : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={disabled}
+                      data-remove-photo={link.photoId}
+                      aria-label={`Remove ${photo?.fileName ?? "photograph"} from this finding`}
+                      onClick={() => onChange(detachPhoto(evidence, link.photoId))}
+                    >
+                      <X aria-hidden="true" />
+                      Remove
+                    </Button>
+                  )}
                 </div>
 
                 {annotations.length > 0 || unknown.length > 0 ? (
@@ -166,48 +177,50 @@ export function EvidenceEditor({
         </ul>
       )}
 
-      <div>
-        <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-slate-800">
-          <Paperclip className="size-4 text-slate-500" aria-hidden="true" />
-          Attach photographs from this inspection
-        </p>
-        {photos.length === 0 ? (
-          <p className="text-sm text-slate-500">This inspection has no photographs yet.</p>
-        ) : available.length === 0 ? (
-          <p className="text-sm text-slate-500">All photographs of this inspection are attached.</p>
-        ) : (
-          <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3" aria-label="Photographs available to attach">
-            {available.map((photo) => {
-              const count = annotationsByPhoto.get(photo.id)?.length ?? 0;
-              return (
-                <li key={photo.id} className="overflow-hidden rounded-md border border-slate-200">
-                  <EvidenceThumb photoId={photo.id} alt={photo.caption ?? photo.fileName} className="aspect-[4/3] w-full rounded-none" />
-                  <div className="space-y-1.5 p-2">
-                    <p className="truncate text-xs font-medium text-slate-900" title={photo.fileName}>
-                      {photo.fileName}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      {count} annotation{count === 1 ? "" : "s"}
-                    </p>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="w-full"
-                      disabled={disabled}
-                      data-attach-photo={photo.id}
-                      aria-label={`Attach ${photo.fileName}`}
-                      onClick={() => onChange(attachPhoto(evidence, photo.id))}
-                    >
-                      <Plus aria-hidden="true" />
-                      Attach
-                    </Button>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
+      {readOnly ? null : (
+        <div>
+          <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-slate-800">
+            <Paperclip className="size-4 text-slate-500" aria-hidden="true" />
+            Attach photographs from this inspection
+          </p>
+          {photos.length === 0 ? (
+            <p className="text-sm text-slate-500">This inspection has no photographs yet.</p>
+          ) : available.length === 0 ? (
+            <p className="text-sm text-slate-500">All photographs of this inspection are attached.</p>
+          ) : (
+            <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3" aria-label="Photographs available to attach">
+              {available.map((photo) => {
+                const count = annotationsByPhoto.get(photo.id)?.length ?? 0;
+                return (
+                  <li key={photo.id} className="overflow-hidden rounded-md border border-slate-200">
+                    <EvidenceThumb photoId={photo.id} alt={photo.caption ?? photo.fileName} className="aspect-[4/3] w-full rounded-none" />
+                    <div className="space-y-1.5 p-2">
+                      <p className="truncate text-xs font-medium text-slate-900" title={photo.fileName}>
+                        {photo.fileName}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {count} annotation{count === 1 ? "" : "s"}
+                      </p>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="w-full"
+                        disabled={disabled}
+                        data-attach-photo={photo.id}
+                        aria-label={`Attach ${photo.fileName}`}
+                        onClick={() => onChange(attachPhoto(evidence, photo.id))}
+                      >
+                        <Plus aria-hidden="true" />
+                        Attach
+                      </Button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }

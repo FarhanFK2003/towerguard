@@ -4,6 +4,7 @@ import type { ID, PhotoBlobRecord, PhotoRecord } from "@/lib/domain/types";
 import { INDEXES, STORES, requestToPromise, withTransaction } from "./db";
 import { StorageError } from "./errors";
 import { pruneFindingEvidence } from "./findings";
+import { assertInspectionEditable } from "./guards";
 import type { DamagedRecord } from "./inspections";
 
 function photoNotFound(id: ID): StorageError {
@@ -18,8 +19,8 @@ export interface NewPhoto {
 
 /**
  * Stores metadata and image data in one transaction: both are written or
- * neither is. Fails (without overwriting anything) if the inspection is gone,
- * the ID exists, or the same file (by SHA-256) is already attached.
+ * neither is. Fails (without overwriting anything) if the inspection is gone
+ * or finalised, the ID exists, or the same file (by SHA-256) is already attached.
  */
 export async function addPhoto({ record, original, thumbnail }: NewPhoto): Promise<PhotoRecord> {
   if (!isPhotoRecord(record) || !(original instanceof Blob) || !(thumbnail instanceof Blob)) {
@@ -29,10 +30,7 @@ export async function addPhoto({ record, original, thumbnail }: NewPhoto): Promi
     [STORES.inspections, STORES.photos, STORES.photoBlobs],
     "readwrite",
     async (tx) => {
-      const inspection = await requestToPromise(tx.objectStore(STORES.inspections).getKey(record.inspectionId));
-      if (inspection === undefined) {
-        throw new StorageError("not_found", "The inspection no longer exists, so the photograph was not saved.");
-      }
+      await assertInspectionEditable(tx, record.inspectionId);
 
       const photos = tx.objectStore(STORES.photos);
       const siblings = await requestToPromise<unknown[]>(
@@ -149,7 +147,7 @@ export async function updatePhotoDetails(
   now: Date = new Date(),
 ): Promise<PhotoRecord> {
   return withTransaction(
-    STORES.photos,
+    [STORES.inspections, STORES.photos],
     "readwrite",
     async (tx) => {
       const store = tx.objectStore(STORES.photos);
@@ -158,6 +156,7 @@ export async function updatePhotoDetails(
       if (!isPhotoRecord(existing)) {
         throw new StorageError("invalid_record", "The stored photograph record is damaged and cannot be updated.");
       }
+      await assertInspectionEditable(tx, existing.inspectionId);
       const updated = applyPhotoDetails(existing, details, now);
       if (!isPhotoRecord(updated)) {
         throw new StorageError("invalid_record", "The update would make the photograph record invalid.");
@@ -189,16 +188,18 @@ function inspectionIdOf(record: unknown): ID | undefined {
  */
 export async function deletePhoto(id: ID): Promise<void> {
   await withTransaction(
-    [STORES.photos, STORES.photoBlobs, STORES.annotations, STORES.findings],
+    [STORES.inspections, STORES.photos, STORES.photoBlobs, STORES.annotations, STORES.findings],
     "readwrite",
     async (tx) => {
       const photos = tx.objectStore(STORES.photos);
       const existing = await requestToPromise<unknown>(photos.get(id));
       if (existing === undefined) throw photoNotFound(id);
+      const inspectionId = inspectionIdOf(existing);
+      // Lock check first: nothing (photo, blobs, annotations, finding links) changes if finalised.
+      if (inspectionId) await assertInspectionEditable(tx, inspectionId, { allowMissing: true });
       await deleteAnnotationsForPhoto(tx, id);
       await requestToPromise(tx.objectStore(STORES.photoBlobs).delete(id));
       await requestToPromise(photos.delete(id));
-      const inspectionId = inspectionIdOf(existing);
       if (inspectionId) await pruneFindingEvidence(tx, inspectionId, (evidence) => detachPhoto(evidence, id));
     },
     "The photograph could not be deleted.",
@@ -212,9 +213,10 @@ export async function deletePhoto(id: ID): Promise<void> {
  */
 export async function deletePhotosForInspection(inspectionId: ID): Promise<number> {
   return withTransaction(
-    [STORES.photos, STORES.photoBlobs, STORES.annotations, STORES.findings],
+    [STORES.inspections, STORES.photos, STORES.photoBlobs, STORES.annotations, STORES.findings],
     "readwrite",
     async (tx) => {
+      await assertInspectionEditable(tx, inspectionId, { allowMissing: true });
       const photos = tx.objectStore(STORES.photos);
       const blobs = tx.objectStore(STORES.photoBlobs);
       const [photoKeys, blobKeys] = await Promise.all([

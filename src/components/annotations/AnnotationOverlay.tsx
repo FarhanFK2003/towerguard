@@ -24,6 +24,7 @@ export function AnnotationOverlay({
   selectedId,
   draft,
   pixel,
+  showHandles = true,
 }: {
   svgRef: Ref<SVGSVGElement>;
   imageWidth: number;
@@ -32,6 +33,8 @@ export function AnnotationOverlay({
   selectedId: string | null;
   draft: AnnotationShape | null;
   pixel: number;
+  /** Resize handles on the selected rectangle (hidden when read-only). */
+  showHandles?: boolean;
 }) {
   const W = imageWidth;
   const H = imageHeight;
@@ -105,7 +108,7 @@ export function AnnotationOverlay({
 
       {(() => {
         const selected = items.find((item) => item.annotation.id === selectedId);
-        if (!selected || selected.shape.kind !== "rect") return null;
+        if (!showHandles || !selected || selected.shape.kind !== "rect") return null;
         const positions = handlePositions(selected.shape);
         const size = 9 * pixel;
         return (

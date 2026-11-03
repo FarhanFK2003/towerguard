@@ -93,3 +93,17 @@ shared between browsers or devices.
 - Deleting a finding never deletes photographs or annotations. Deleting a photograph removes its link
   (and its annotations' links) from findings; deleting an annotation removes just that link. Findings
   are kept, and damaged finding records are never modified.
+
+## Review and finalisation
+
+- Findings are reviewed with explicit actions, separate from editing: confirm (optional note), dismiss
+  (reason required) or return to observation. A finding changed after its review (details or evidence)
+  is shown as "Edited after review" and needs reviewing again.
+- Inspection lifecycle: draft → in review → finalised, and finalised → in review (reopen). Finalising
+  requires every finding to have a current review and no damaged finding records; warnings (no findings,
+  confirmed findings without evidence) must be acknowledged. Readiness is re-checked in storage.
+- A finalised inspection is read-only **in storage**: every photo, annotation and finding write checks the
+  lock in the same transaction and changes nothing if finalised. Deleting the whole inspection remains
+  possible with an explicit confirmation.
+- Finalising records that the inspector completed the documentation. It is not a structural safety or
+  engineering assessment.

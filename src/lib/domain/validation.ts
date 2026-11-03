@@ -169,11 +169,24 @@ function isOptionalString(value: unknown): boolean {
   return value === undefined || typeof value === "string";
 }
 
-/** Runtime guard for records read from storage or imported from files. */
+function isFinalisation(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const f = value as Record<string, unknown>;
+  return isNonEmptyString(f.finalisedBy) && typeof f.finalisedAt === "string" && isIsoDateTime(f.finalisedAt);
+}
+
+/**
+ * Runtime guard for records read from storage or imported from files.
+ * Finalisation metadata must be present exactly when the status is `finalised`
+ * (older records simply have no `finalisation` field).
+ */
 export function isInspection(value: unknown): value is Inspection {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
+  const finalisationConsistent =
+    record.status === "finalised" ? isFinalisation(record.finalisation) : record.finalisation === undefined;
   return (
+    finalisationConsistent &&
     isNonEmptyString(record.id) &&
     isNonEmptyString(record.siteId) &&
     isNonEmptyString(record.siteName) &&

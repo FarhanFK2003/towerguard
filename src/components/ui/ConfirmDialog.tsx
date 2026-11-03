@@ -11,6 +11,8 @@ export interface ConfirmDialogProps {
   description: ReactNode;
   confirmLabel: string;
   busy?: boolean;
+  /** Keeps only the confirm button disabled (e.g. until an extra acknowledgement is given). */
+  confirmDisabled?: boolean;
   error?: string | null;
   onConfirm: () => void;
   onCancel: () => void;
@@ -26,6 +28,7 @@ export function ConfirmDialog({
   description,
   confirmLabel,
   busy = false,
+  confirmDisabled = false,
   error,
   onConfirm,
   onCancel,
@@ -80,7 +83,7 @@ export function ConfirmDialog({
         <Button variant="secondary" onClick={onCancel} disabled={busy} autoFocus>
           Cancel
         </Button>
-        <Button variant="danger" onClick={onConfirm} disabled={busy}>
+        <Button variant="danger" onClick={onConfirm} disabled={busy || confirmDisabled}>
           {busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : null}
           {confirmLabel}
         </Button>

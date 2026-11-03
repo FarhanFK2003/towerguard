@@ -1,21 +1,28 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, type ReactNode } from "react";
 import Link from "next/link";
-import { ListChecks, Plus } from "lucide-react";
+import { CircleCheck, CircleSlash, Clock, ListChecks, Plus, TriangleAlert } from "lucide-react";
 import { buttonClasses } from "@/components/ui/Button";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useAsyncData } from "@/hooks/useAsyncData";
-import { FINDING_STATUSES, INSPECTOR_PRIORITIES } from "@/lib/domain/constants";
-import { summarizeFindings } from "@/lib/domain/finding";
+import { INSPECTOR_PRIORITIES } from "@/lib/domain/constants";
+import { reviewCounts, summarizeFindings, type ReviewCounts } from "@/lib/domain/finding";
 import type { ID } from "@/lib/domain/types";
 import { describeStorageError } from "@/lib/storage/errors";
 import { listFindings } from "@/lib/storage/findings";
-import { FindingStatusBadge, PriorityBadge } from "./FindingBadges";
+import { PriorityBadge } from "./FindingBadges";
 
-/** Compact counts by status and priority for the inspection overview. */
-export function FindingsSummaryCard({ inspectionId }: { inspectionId: ID }) {
+const REVIEW_TILES: readonly { key: keyof ReviewCounts; label: string; icon: ReactNode }[] = [
+  { key: "unreviewed", label: "Observations needing review", icon: <Clock className="text-sky-600" /> },
+  { key: "confirmed", label: "Confirmed", icon: <CircleCheck className="text-emerald-600" /> },
+  { key: "dismissed", label: "Dismissed", icon: <CircleSlash className="text-slate-500" /> },
+  { key: "outOfDate", label: "Out-of-date reviews", icon: <TriangleAlert className="text-amber-600" /> },
+];
+
+/** Review counts and priorities for the inspection overview (from stored findings). */
+export function FindingsSummaryCard({ inspectionId, readOnly = false }: { inspectionId: ID; readOnly?: boolean }) {
   const load = useCallback(() => listFindings(inspectionId), [inspectionId]);
   const { state } = useAsyncData(load);
   const base = `/inspections/${inspectionId}/findings`;
@@ -27,10 +34,12 @@ export function FindingsSummaryCard({ inspectionId }: { inspectionId: ID }) {
         description="Recorded and reviewed by the inspector."
         icon={<ListChecks />}
         action={
-          <Link href={`${base}/new`} className={buttonClasses({ size: "sm", variant: "secondary" })}>
-            <Plus aria-hidden="true" />
-            New finding
-          </Link>
+          readOnly ? undefined : (
+            <Link href={`${base}/new`} className={buttonClasses({ size: "sm", variant: "secondary" })}>
+              <Plus aria-hidden="true" />
+              New finding
+            </Link>
+          )
         }
       />
       <CardBody className="space-y-4">
@@ -38,29 +47,33 @@ export function FindingsSummaryCard({ inspectionId }: { inspectionId: ID }) {
           <Skeleton className="h-16 w-full" />
         ) : state.status === "error" ? (
           <p className="text-sm text-red-700">{describeStorageError(state.error)}</p>
-        ) : state.data.findings.length === 0 ? (
-          <p className="text-sm text-slate-500">
-            No findings recorded yet.
-            {state.data.damaged.length > 0 ? ` ${state.data.damaged.length} damaged finding record(s) could not be read.` : ""}
-          </p>
+        ) : state.data.findings.length === 0 && state.data.damaged.length === 0 ? (
+          <p className="text-sm text-slate-500">No findings recorded yet.</p>
         ) : (
           (() => {
+            const counts = reviewCounts(state.data.findings);
             const summary = summarizeFindings(state.data.findings);
             return (
               <>
-                <div>
-                  <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-slate-500">
-                    By status ({summary.total})
-                  </p>
-                  <ul className="flex flex-wrap gap-1.5">
-                    {FINDING_STATUSES.map((status) => (
-                      <li key={status} data-summary-status={status} className="flex items-center gap-1 text-sm">
-                        <FindingStatusBadge status={status} />
-                        <span className="font-semibold tabular-nums text-slate-900">{summary.byStatus[status]}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                <p className="text-sm text-slate-700">
+                  <span className="font-semibold tabular-nums text-slate-900" data-summary-review="total">
+                    {counts.total}
+                  </span>{" "}
+                  finding{counts.total === 1 ? "" : "s"}
+                </p>
+                <dl className="grid grid-cols-2 gap-2">
+                  {REVIEW_TILES.map(({ key, label, icon }) => (
+                    <div key={key} className="rounded-md border border-slate-200 px-2.5 py-2">
+                      <dt className="flex items-center gap-1 text-xs text-slate-500 [&_svg]:size-3.5">
+                        {icon}
+                        {label}
+                      </dt>
+                      <dd className="text-lg font-semibold tabular-nums text-slate-900" data-summary-review={key}>
+                        {counts[key]}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
                 <div>
                   <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-slate-500">
                     By priority (excluding dismissed)
@@ -75,8 +88,9 @@ export function FindingsSummaryCard({ inspectionId }: { inspectionId: ID }) {
                   </ul>
                 </div>
                 {state.data.damaged.length > 0 ? (
-                  <p className="text-xs text-amber-800">
-                    {state.data.damaged.length} damaged finding record(s) could not be read; see the findings page.
+                  <p className="text-xs text-amber-800" data-summary-review="damaged">
+                    {state.data.damaged.length} damaged finding record(s) could not be read and are not counted above;
+                    see the findings page.
                   </p>
                 ) : null}
               </>

@@ -158,14 +158,14 @@ describe("listFindings", () => {
 });
 
 describe("updateFinding", () => {
-  it("updates fields, evidence, priority and status and records the reviewer", async () => {
+  it("updates fields, evidence and priority (status unchanged)", async () => {
     await seed();
     await createFinding(makeFinding({ evidence: [{ photoId: "p1", annotationIds: ["a1"] }] }));
     const now = new Date("2026-11-03T08:00:00.000Z");
     const updated = await updateFinding(
       "finding-1",
       {
-        fields: { ...FIELDS, title: "Edited", inspectorPriority: "urgent", status: "confirmed" },
+        fields: { ...FIELDS, title: "Edited", inspectorPriority: "urgent" },
         evidence: [
           { photoId: "p1", annotationIds: ["a1", "a2"] },
           { photoId: "p2", annotationIds: [] },
@@ -177,12 +177,22 @@ describe("updateFinding", () => {
     expect(updated).toMatchObject({
       title: "Edited",
       inspectorPriority: "urgent",
-      status: "confirmed",
+      status: "observation",
       engineeringSeverity: "not_assessed",
-      review: { reviewedBy: "B. Reviewer", reviewedAt: now.toISOString() },
       updatedAt: now.toISOString(),
     });
+    expect(updated.review).toBeUndefined();
     await expect(getFinding("finding-1")).resolves.toEqual(updated);
+  });
+
+  it("refuses a status change (status changes only through review) and saves nothing", async () => {
+    await seed();
+    const original = makeFinding();
+    await createFinding(original);
+    await expect(
+      updateFinding("finding-1", { fields: { ...FIELDS, title: "Edited", status: "confirmed" } }, "B. Reviewer"),
+    ).rejects.toMatchObject({ code: "invalid_record", message: expect.stringContaining("review actions") });
+    await expect(getFinding("finding-1")).resolves.toEqual(original);
   });
 
   it("removing evidence keeps the photograph and annotation", async () => {

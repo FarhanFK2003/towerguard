@@ -6,7 +6,9 @@ export type StorageErrorCode =
   | "already_exists"
   | "invalid_record"
   | "quota_exceeded"
-  | "transaction_failed";
+  | "transaction_failed"
+  /** The inspection is finalised and read-only. */
+  | "locked";
 
 export class StorageError extends Error {
   readonly code: StorageErrorCode;

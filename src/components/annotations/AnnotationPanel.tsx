@@ -36,6 +36,7 @@ export function AnnotationPanel({
   onSelect,
   onLabelChange,
   onDelete,
+  readOnly = false,
   damagedCount,
 }: {
   photo: PhotoRecord;
@@ -44,6 +45,8 @@ export function AnnotationPanel({
   onSelect: (id: ID | null) => void;
   onLabelChange: (id: ID, label: AnnotationLabel | undefined) => void;
   onDelete: (id: ID) => void;
+  /** Finalised inspection: details are visible; label, finding creation and deletion are unavailable. */
+  readOnly?: boolean;
   damagedCount: number;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -116,6 +119,7 @@ export function AnnotationPanel({
               <Select
                 id="annotation-label"
                 value={selected.label ?? ""}
+                disabled={readOnly}
                 onChange={(e) => {
                   const value = e.target.value;
                   onLabelChange(selected.id, isOneOf(ANNOTATION_LABELS, value) ? value : undefined);
@@ -143,20 +147,24 @@ export function AnnotationPanel({
                 </dd>
               </div>
             </dl>
-            <div className="flex flex-wrap gap-2">
-              <Link
-                href={`/inspections/${photo.inspectionId}/findings/new?photo=${encodeURIComponent(photo.id)}&annotation=${encodeURIComponent(selected.id)}`}
-                className={buttonClasses({ size: "sm" })}
-                data-testid="create-finding-from-annotation"
-              >
-                <ListPlus aria-hidden="true" />
-                Create finding from annotation
-              </Link>
-              <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(true)}>
-                <Trash2 aria-hidden="true" />
-                Delete annotation
-              </Button>
-            </div>
+            {readOnly ? (
+              <p className="text-xs text-slate-500">The inspection is finalised, so this annotation cannot be changed.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href={`/inspections/${photo.inspectionId}/findings/new?photo=${encodeURIComponent(photo.id)}&annotation=${encodeURIComponent(selected.id)}`}
+                  className={buttonClasses({ size: "sm" })}
+                  data-testid="create-finding-from-annotation"
+                >
+                  <ListPlus aria-hidden="true" />
+                  Create finding from annotation
+                </Link>
+                <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(true)}>
+                  <Trash2 aria-hidden="true" />
+                  Delete annotation
+                </Button>
+              </div>
+            )}
             <ConfirmDialog
               open={confirmDelete}
               title={`Delete annotation #${selectedIndex + 1}?`}

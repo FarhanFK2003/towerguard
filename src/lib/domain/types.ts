@@ -35,8 +35,18 @@ export interface Inspection {
   weather?: string;
   notes?: string;
   status: InspectionStatus;
+  /**
+   * Present exactly when `status` is `finalised`: the inspector completed the
+   * documentation. Not a structural safety or engineering assessment.
+   */
+  finalisation?: InspectionFinalisation;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
+}
+
+export interface InspectionFinalisation {
+  finalisedBy: string;
+  finalisedAt: IsoDateTime;
 }
 
 /** Photo metadata. The image bytes live separately in {@link PhotoBlobRecord}. */

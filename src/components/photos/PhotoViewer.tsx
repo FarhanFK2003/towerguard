@@ -4,6 +4,7 @@ import { useCallback, type ReactNode } from "react";
 import Link from "next/link";
 import { Download, FileImage, ImageOff, PencilLine, RotateCw, SearchX } from "lucide-react";
 import { AnnotationWorkspace } from "@/components/annotations/AnnotationWorkspace";
+import { ReadOnlyBanner } from "@/components/inspections/ReadOnlyBanner";
 import { BackLink } from "@/components/layout/BackLink";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button, buttonClasses } from "@/components/ui/Button";
@@ -14,7 +15,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { useStoredImage } from "@/hooks/useStoredImage";
 import { PHOTO_MIME_TYPE_LABELS } from "@/lib/domain/constants";
-import type { ID, PhotoRecord } from "@/lib/domain/types";
+import type { ID, Inspection, PhotoRecord } from "@/lib/domain/types";
 import { formatBytes, formatTimestamp } from "@/lib/format";
 import { describeStorageError } from "@/lib/storage/errors";
 import { getInspection } from "@/lib/storage/inspections";
@@ -74,27 +75,29 @@ export function PhotoViewer({ inspectionId, photoId }: { inspectionId: ID; photo
     );
   }
 
-  return <PhotoDetails photo={photo} inspectorName={inspection.inspectorName} onUpdated={refresh} />;
+  return <PhotoDetails photo={photo} inspection={inspection} onUpdated={refresh} />;
 }
 
 function PhotoDetails({
   photo,
-  inspectorName,
+  inspection,
   onUpdated,
 }: {
   photo: PhotoRecord;
-  inspectorName: string;
+  inspection: Inspection;
   onUpdated: () => void;
 }) {
   const loadOriginal = useCallback(() => getPhotoOriginal(photo.id), [photo.id]);
   const image = useStoredImage(loadOriginal);
+  // From the loaded inspection; cached pages reload it when shown again, so this follows finalise/reopen.
+  const readOnly = inspection.status === "finalised";
 
   const sidebar = (
     <>
       <Card>
         <CardHeader title="Caption & viewpoint" icon={<PencilLine />} />
         <CardBody>
-          <PhotoDetailsForm photo={photo} onSaved={onUpdated} />
+          <PhotoDetailsForm key={readOnly ? "read-only" : "editable"} photo={photo} readOnly={readOnly} onSaved={onUpdated} />
         </CardBody>
       </Card>
 
@@ -136,6 +139,7 @@ function PhotoDetails({
   return (
     <div className="space-y-6">
       <BackLink href={`/inspections/${photo.inspectionId}`}>Inspection</BackLink>
+      <ReadOnlyBanner inspection={inspection} />
 
       <PageHeader
         eyebrow="Photograph"
@@ -149,13 +153,19 @@ function PhotoDetails({
                 Download original
               </a>
             ) : null}
-            <DeletePhotoButton photo={photo} />
+            {readOnly ? null : <DeletePhotoButton photo={photo} />}
           </>
         }
       />
 
       {image.status === "ready" ? (
-        <AnnotationWorkspace photo={photo} imageUrl={image.url} recordedBy={inspectorName} sidebar={sidebar} />
+        <AnnotationWorkspace
+          photo={photo}
+          imageUrl={image.url}
+          recordedBy={inspection.inspectorName}
+          readOnly={readOnly}
+          sidebar={sidebar}
+        />
       ) : (
         <div className="grid gap-6 lg:grid-cols-3">
           <figure className="space-y-2 lg:col-span-2">

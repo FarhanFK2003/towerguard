@@ -20,6 +20,8 @@ import { formatIsoDate, formatTimestamp } from "@/lib/format";
 import { describeStorageError } from "@/lib/storage/errors";
 import { getInspection } from "@/lib/storage/inspections";
 import { DeleteInspectionButton } from "./DeleteInspectionButton";
+import { InspectionReviewCard } from "./InspectionReviewCard";
+import { ReadOnlyBanner } from "./ReadOnlyBanner";
 import { InspectionStatusBadge } from "./InspectionStatusBadge";
 
 function Detail({ label, children }: { label: string; children: ReactNode }) {
@@ -37,7 +39,7 @@ function NotRecorded() {
 
 export function InspectionOverview({ inspectionId }: { inspectionId: string }) {
   const load = useCallback(() => getInspection(inspectionId), [inspectionId]);
-  const { state, reload } = useAsyncData(load);
+  const { state, reload, refresh } = useAsyncData(load);
 
   if (state.status === "loading") return <InspectionOverviewSkeleton />;
 
@@ -72,16 +74,18 @@ export function InspectionOverview({ inspectionId }: { inspectionId: string }) {
     );
   }
 
-  return <InspectionDetails inspection={state.data} />;
+  return <InspectionDetails inspection={state.data} onInspectionChanged={refresh} />;
 }
 
-function InspectionDetails({ inspection }: { inspection: Inspection }) {
+function InspectionDetails({ inspection, onInspectionChanged }: { inspection: Inspection; onInspectionChanged: () => void }) {
   const [storageVersion, setStorageVersion] = useState(0);
   const onStorageChanged = useCallback(() => setStorageVersion((v) => v + 1), []);
+  const readOnly = inspection.status === "finalised";
 
   return (
     <div className="space-y-6">
       <BackLink href="/">Dashboard</BackLink>
+      <ReadOnlyBanner inspection={inspection} showReopenLink={false} />
 
       <PageHeader
         eyebrow={`Site ${inspection.siteId}`}
@@ -130,11 +134,13 @@ function InspectionDetails({ inspection }: { inspection: Inspection }) {
             </CardBody>
           </Card>
 
-          <PhotoGallery inspectionId={inspection.id} onStorageChanged={onStorageChanged} />
+          <PhotoGallery inspectionId={inspection.id} readOnly={readOnly} onStorageChanged={onStorageChanged} />
         </div>
 
         <div className="space-y-6">
-          <FindingsSummaryCard inspectionId={inspection.id} />
+          <InspectionReviewCard key={inspection.updatedAt} inspection={inspection} onChanged={onInspectionChanged} />
+
+          <FindingsSummaryCard inspectionId={inspection.id} readOnly={readOnly} />
 
           <Card>
             <CardHeader title="Record" icon={<Info />} />

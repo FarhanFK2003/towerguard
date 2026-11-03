@@ -3,7 +3,8 @@
 import { useCallback, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CircleCheck, Info, LoaderCircle, Paperclip, RotateCw, Save, SearchX, Trash2 } from "lucide-react";
+import { CircleCheck, ClipboardCheck, Info, LoaderCircle, Lock, Paperclip, RotateCw, Save, SearchX, Trash2 } from "lucide-react";
+import { ReadOnlyBanner } from "@/components/inspections/ReadOnlyBanner";
 import { BackLink } from "@/components/layout/BackLink";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button, buttonClasses } from "@/components/ui/Button";
@@ -28,7 +29,9 @@ import {
   FINDING_LIMITS,
   createFindingRecord,
   findingToFormValues,
+  nextFindingNeedingReview,
   normalizeEvidence,
+  reviewState,
   toggleAnnotation,
   validateFindingInput,
   type FindingField,
@@ -39,20 +42,23 @@ import type { FieldErrors } from "@/lib/domain/validation";
 import { formatTimestamp } from "@/lib/format";
 import { listAnnotationsForInspection } from "@/lib/storage/annotations";
 import { describeStorageError } from "@/lib/storage/errors";
-import { createFinding, deleteFinding, getFinding, updateFinding } from "@/lib/storage/findings";
+import { createFinding, deleteFinding, getFinding, listFindings, updateFinding } from "@/lib/storage/findings";
 import { getInspection } from "@/lib/storage/inspections";
 import { listPhotos } from "@/lib/storage/photos";
 import { EvidenceEditor } from "./EvidenceEditor";
-import { FindingStatusBadge, PRIORITY_STYLE, PriorityBadge, STATUS_EXPLANATIONS, STATUS_STYLE } from "./FindingBadges";
+import { FindingStatusBadge, PRIORITY_STYLE, PriorityBadge, STATUS_EXPLANATIONS } from "./FindingBadges";
+import { FindingReviewPanel, STALE_REVIEW_MESSAGE } from "./FindingReviewPanel";
 
 interface EditorData {
   inspection: Inspection | undefined;
   photos: PhotoRecord[];
   annotations: Annotation[];
   finding: Finding | undefined;
+  /** All findings of the inspection, in list order (for "next finding needing review"). */
+  findings: Finding[];
 }
 
-const FIELD_ORDER: readonly FindingField[] = ["title", "description", "category", "priority", "status", "componentLocation", "recommendedAction"];
+const FIELD_ORDER: readonly FindingField[] = ["title", "description", "category", "priority", "componentLocation", "recommendedAction"];
 const fieldId = (field: FindingField) => `finding-${field}`;
 
 /**
@@ -72,13 +78,14 @@ export function FindingEditor({
   initialAnnotationId?: ID;
 }) {
   const load = useCallback(async (): Promise<EditorData> => {
-    const [inspection, photoList, annotations, finding] = await Promise.all([
+    const [inspection, photoList, annotations, finding, findingList] = await Promise.all([
       getInspection(inspectionId),
       listPhotos(inspectionId),
       listAnnotationsForInspection(inspectionId),
       findingId ? getFinding(findingId) : Promise.resolve(undefined),
+      listFindings(inspectionId),
     ]);
-    return { inspection, photos: photoList.photos, annotations, finding };
+    return { inspection, photos: photoList.photos, annotations, finding, findings: findingList.findings };
   }, [inspectionId, findingId]);
   const { state, reload } = useAsyncData(load);
   const [formGeneration, setFormGeneration] = useState(0);
@@ -112,6 +119,26 @@ export function FindingEditor({
     );
   }
 
+  if (!finding && inspection.status === "finalised") {
+    return (
+      <div className="space-y-6">
+        <BackLink href={`/inspections/${inspectionId}/findings`}>Findings</BackLink>
+        <ReadOnlyBanner inspection={inspection} />
+        <EmptyState
+          className="bg-white py-16"
+          icon={<Lock />}
+          title="Findings cannot be added to a finalised inspection"
+          description="Reopen the inspection on its overview page to add findings."
+          action={
+            <Link href={`/inspections/${inspectionId}`} className={buttonClasses({ variant: "secondary" })}>
+              Go to the inspection
+            </Link>
+          }
+        />
+      </div>
+    );
+  }
+
   // Pre-link evidence only if the referenced photo/annotation really belong to this inspection.
   let initialEvidence: EvidenceLink[] = finding?.evidence ?? [];
   let prefillProblem: string | null = null;
@@ -127,13 +154,15 @@ export function FindingEditor({
 
   return (
     <EditorForm
-      // Fresh form state per finding version, per pre-linked evidence, and after each creation.
-      key={finding?.updatedAt ?? `new-${initialPhotoId ?? ""}-${initialAnnotationId ?? ""}-${formGeneration}`}
+      // Fresh form state per finding version, per pre-linked evidence, after each creation,
+      // and when the inspection is finalised or reopened (drops unsaved drafts).
+      key={`${finding?.updatedAt ?? `new-${initialPhotoId ?? ""}-${initialAnnotationId ?? ""}-${formGeneration}`}-${inspection.status}`}
       onCreated={() => setFormGeneration((n) => n + 1)}
       inspection={inspection}
       photos={state.data.photos}
       annotations={state.data.annotations}
       finding={finding}
+      siblings={state.data.findings}
       initialEvidence={initialEvidence}
       prefillProblem={prefillProblem}
     />
@@ -214,6 +243,7 @@ function EditorForm({
   initialEvidence,
   prefillProblem,
   onCreated,
+  siblings,
 }: {
   inspection: Inspection;
   photos: PhotoRecord[];
@@ -223,6 +253,7 @@ function EditorForm({
   prefillProblem: string | null;
   /** Called after a new finding is saved, so the (preserved) form can reset. */
   onCreated: () => void;
+  siblings: Finding[];
 }) {
   const router = useRouter();
   const initialValues = useMemo(() => findingToFormValues(finding), [finding]);
@@ -243,10 +274,31 @@ function EditorForm({
   }, [annotations]);
 
   const isNew = !current;
+  const readOnly = inspection.status === "finalised";
   const findingsHref = `/inspections/${inspection.id}/findings`;
   const dirty =
     JSON.stringify(values) !== JSON.stringify(current ? findingToFormValues(current) : initialValues) ||
     JSON.stringify(normalizeEvidence(evidence)) !== JSON.stringify(current?.evidence ?? initialEvidence);
+  const stale = current ? reviewState(current) === "stale" : false;
+  const next = current
+    ? nextFindingNeedingReview(
+        siblings.map((f) => (f.id === current.id ? current : f)),
+        current.id,
+      )
+    : undefined;
+
+  function focusReviewPanel() {
+    const panel = document.getElementById("finding-review");
+    panel?.scrollIntoView({ block: "center" });
+    (document.getElementById("review-note") ?? panel)?.focus({ preventScroll: true });
+  }
+
+  function onReviewed(updated: Finding) {
+    setCurrent(updated);
+    // Keep the (hidden) status in the form values in step, so the form isn't marked as edited.
+    setValues((prev) => ({ ...prev, status: updated.status }));
+    setSaved(false);
+  }
 
   function update(field: FindingField, value: string) {
     setValues((prev) => ({ ...prev, [field]: value }));
@@ -309,13 +361,14 @@ function EditorForm({
     value: values[field],
     invalid: Boolean(errors[field]),
     "aria-describedby": describedBy(fieldId(field), { error: errors[field] }),
-    disabled: saving,
+    disabled: saving || readOnly,
     onChange: (e: { target: { value: string } }) => update(field, e.target.value),
   });
 
   return (
     <form onSubmit={handleSubmit} noValidate className="space-y-6">
       <BackLink href={findingsHref}>Findings</BackLink>
+      <ReadOnlyBanner inspection={inspection} />
       <PageHeader
         eyebrow={`Finding · ${inspection.siteName} (${inspection.siteId})`}
         title={current ? current.title : "New finding"}
@@ -330,7 +383,7 @@ function EditorForm({
           )
         }
         actions={
-          current ? (
+          current && !readOnly ? (
             <Button variant="secondary" onClick={() => setConfirmDelete(true)}>
               <Trash2 aria-hidden="true" />
               Delete
@@ -339,6 +392,19 @@ function EditorForm({
         }
       />
 
+      {stale ? (
+        <div data-testid="stale-review-warning">
+          <Callout tone="warning" title={STALE_REVIEW_MESSAGE}>
+            <p>The details or evidence changed after the last review.</p>
+            {readOnly ? null : (
+              <Button variant="secondary" size="sm" className="mt-3" onClick={focusReviewPanel}>
+                <ClipboardCheck aria-hidden="true" />
+                Review again
+              </Button>
+            )}
+          </Callout>
+        </div>
+      ) : null}
       {prefillProblem ? <Callout tone="warning" title="Evidence not linked">{prefillProblem}</Callout> : null}
       {Object.keys(errors).some((k) => errors[k as FindingField]) ? (
         <Callout tone="danger" title="The finding was not saved">
@@ -370,7 +436,7 @@ function EditorForm({
                     invalid={Boolean(errors.category)}
                     aria-required="true"
                     aria-describedby={describedBy(fieldId("category"), { error: errors.category })}
-                    disabled={saving}
+                    disabled={saving || readOnly}
                     onChange={(e) => update("category", e.target.value)}
                   >
                     <option value="" disabled>
@@ -393,7 +459,7 @@ function EditorForm({
                 value={values.priority}
                 options={[...INSPECTOR_PRIORITIES]}
                 error={errors.priority}
-                disabled={saving}
+                disabled={saving || readOnly}
                 onChange={(v) => update("priority", v)}
                 render={(p) => (
                   <span className="inline-flex items-center gap-1.5 [&_svg]:size-4">
@@ -405,24 +471,11 @@ function EditorForm({
               <p className="-mt-3 text-xs text-slate-500">
                 Your follow-up priority. It is not derived from the category and is not an engineering severity rating.
               </p>
-              <ChoiceGroup
-                name="status"
-                label="Status"
-                value={values.status}
-                options={[...FINDING_STATUSES]}
-                error={errors.status}
-                disabled={saving}
-                onChange={(v) => update("status", v)}
-                render={(s) => (
-                  <span>
-                    <span className="inline-flex items-center gap-1.5 font-medium [&_svg]:size-4">
-                      {STATUS_STYLE[s].icon}
-                      {FINDING_STATUS_LABELS[s]}
-                    </span>
-                    <span className="block text-xs text-slate-500">{STATUS_EXPLANATIONS[s]}</span>
-                  </span>
-                )}
-              />
+              <p className="text-xs text-slate-500">
+                {isNew
+                  ? "New findings start as observations. Review them (confirm or dismiss) after saving."
+                  : "Status changes through the review actions, not by editing."}
+              </p>
               <Field id={fieldId("recommendedAction")} label="Recommended action" error={errors.recommendedAction}>
                 <Textarea {...bind("recommendedAction")} className="min-h-20" maxLength={FINDING_LIMITS.recommendedAction} />
               </Field>
@@ -441,6 +494,7 @@ function EditorForm({
                 annotationsByPhoto={annotationsByPhoto}
                 evidence={evidence}
                 disabled={saving}
+                readOnly={readOnly}
                 onChange={(next) => {
                   setEvidence(next);
                   setSaved(false);
@@ -459,14 +513,26 @@ function EditorForm({
             <Link href={findingsHref} className={buttonClasses({ variant: "secondary" })}>
               {isNew ? "Cancel" : "Back to findings"}
             </Link>
-            <Button type="submit" disabled={saving || (!isNew && !dirty)}>
-              {saving ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
-              {saving ? "Saving…" : isNew ? "Create finding" : "Save changes"}
-            </Button>
+            {readOnly ? null : (
+              <Button type="submit" disabled={saving || (!isNew && !dirty)}>
+                {saving ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
+                {saving ? "Saving…" : isNew ? "Create finding" : "Save changes"}
+              </Button>
+            )}
           </div>
         </div>
 
         <div className="space-y-6">
+          {current ? (
+            <FindingReviewPanel
+              finding={current}
+              reviewer={inspection.inspectorName}
+              readOnly={readOnly}
+              hasUnsavedEdits={dirty}
+              nextHref={next ? `${findingsHref}/${next.id}` : undefined}
+              onReviewed={onReviewed}
+            />
+          ) : null}
           <Callout tone="info" title="What the statuses mean">
             <ul className="space-y-1">
               {FINDING_STATUSES.map((s) => (

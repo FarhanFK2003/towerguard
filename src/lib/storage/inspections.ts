@@ -1,4 +1,13 @@
-import { applyInspectionPatch, type InspectionPatch } from "@/lib/domain/inspection";
+import { isFinding } from "@/lib/domain/finding";
+import {
+  applyInspectionPatch,
+  finaliseInspectionRecord,
+  reopenInspectionRecord,
+  startInspectionReview as startReviewTransition,
+  type InspectionPatch,
+  type LifecycleResult,
+} from "@/lib/domain/inspection";
+import { assessReadiness, canFinalise, type Readiness } from "@/lib/domain/readiness";
 import type { ID, Inspection } from "@/lib/domain/types";
 import { isInspection } from "@/lib/domain/validation";
 import {
@@ -10,6 +19,7 @@ import {
   type InspectionChildStore,
 } from "./db";
 import { StorageError } from "./errors";
+import { LOCKED_MESSAGE } from "./guards";
 
 function notFound(id: ID): StorageError {
   return new StorageError("not_found", `Inspection ${id} was not found.`);
@@ -110,7 +120,10 @@ export async function updateInspection(
       if (!isInspection(existing)) {
         throw new StorageError("invalid_record", "The stored inspection record is damaged and cannot be updated.");
       }
+      // A finalised inspection only changes through `reopenInspection`.
+      if (existing.status === "finalised") throw new StorageError("locked", LOCKED_MESSAGE);
       const updated = applyInspectionPatch(existing, patch, now);
+      // Rejects e.g. a plain status patch to `finalised` (no finalisation metadata).
       if (!isInspection(updated)) {
         throw new StorageError("invalid_record", "The update would make the inspection invalid and was not saved.");
       }
@@ -118,6 +131,110 @@ export async function updateInspection(
       return updated;
     },
     "The inspection could not be updated.",
+  );
+}
+
+// ---- Review lifecycle -----------------------------------------------------
+
+async function loadValidInspection(tx: IDBTransaction, id: ID): Promise<Inspection> {
+  const existing = await requestToPromise<unknown>(tx.objectStore(STORES.inspections).get(id));
+  if (existing === undefined) throw notFound(id);
+  if (!isInspection(existing)) {
+    throw new StorageError("invalid_record", "The stored inspection record is damaged and its status cannot be changed.");
+  }
+  return existing;
+}
+
+function applyTransition(result: LifecycleResult): Inspection {
+  if (!result.ok) throw new StorageError("invalid_record", result.error);
+  return result.value;
+}
+
+/** draft → in_review. */
+export async function startInspectionReview(id: ID, now: Date = new Date()): Promise<Inspection> {
+  return withTransaction(
+    STORES.inspections,
+    "readwrite",
+    async (tx) => {
+      const updated = applyTransition(startReviewTransition(await loadValidInspection(tx, id), now));
+      await requestToPromise(tx.objectStore(STORES.inspections).put(updated));
+      return updated;
+    },
+    "The inspection review could not be started.",
+  );
+}
+
+/** Readiness from the stored findings, read in the given transaction (damaged records counted). */
+async function readinessInTransaction(tx: IDBTransaction, inspectionId: ID): Promise<Readiness> {
+  const records = await requestToPromise<unknown[]>(
+    tx.objectStore(STORES.findings).index(INDEXES.byInspectionId).getAll(inspectionId),
+  );
+  const findings = records.filter(isFinding);
+  return assessReadiness(findings, records.length - findings.length);
+}
+
+/** Current readiness, for display. Finalisation re-checks it inside its own transaction. */
+export async function getInspectionReadiness(inspectionId: ID): Promise<Readiness> {
+  return withTransaction(
+    STORES.findings,
+    "readonly",
+    (tx) => readinessInTransaction(tx, inspectionId),
+    "The inspection readiness could not be checked.",
+  );
+}
+
+/**
+ * in_review → finalised, recording the inspector and time. Readiness is
+ * re-assessed from the stored findings inside this transaction (the UI's view
+ * may be out of date): any blocker refuses finalisation, and warnings must be
+ * acknowledged explicitly. Finalisation records that the documentation is
+ * complete; it is not a structural safety or engineering assessment.
+ */
+export async function finaliseInspection(
+  id: ID,
+  options: { acknowledgeWarnings: boolean },
+  now: Date = new Date(),
+): Promise<Inspection> {
+  return withTransaction(
+    [STORES.inspections, STORES.findings],
+    "readwrite",
+    async (tx) => {
+      const inspection = await loadValidInspection(tx, id);
+      if (inspection.status !== "in_review") {
+        throw new StorageError("invalid_record", "Only an inspection in review can be finalised.");
+      }
+      const readiness = await readinessInTransaction(tx, id);
+      if (readiness.blocked) {
+        throw new StorageError(
+          "invalid_record",
+          `The inspection cannot be finalised yet: ${readiness.blockers.map((b) => b.message).join(" ")}`,
+        );
+      }
+      if (!canFinalise(readiness, options.acknowledgeWarnings)) {
+        throw new StorageError(
+          "invalid_record",
+          `Acknowledge the documentation warnings to finalise: ${readiness.warnings.map((w) => w.message).join(" ")}`,
+        );
+      }
+      const updated = applyTransition(finaliseInspectionRecord(inspection, inspection.inspectorName, now));
+      await requestToPromise(tx.objectStore(STORES.inspections).put(updated));
+      return updated;
+    },
+    "The inspection could not be finalised.",
+  );
+}
+
+/** finalised → in_review: clears the finalisation and restores editing. All other data is kept. */
+export async function reopenInspection(id: ID, now: Date = new Date()): Promise<Inspection> {
+  return withTransaction(
+    STORES.inspections,
+    "readwrite",
+    async (tx) => {
+      const updated = applyTransition(reopenInspectionRecord(await loadValidInspection(tx, id), now));
+      await requestToPromise(tx.objectStore(STORES.inspections).put(updated));
+      return updated;
+    },
+    "The inspection could not be reopened.",
   );
 }
 

@@ -76,21 +76,28 @@ const TOOL_HINTS: Record<Tool, string> = {
   point: "Click or tap on the photograph to place a point.",
 };
 
+const READ_ONLY_HINT =
+  "Read-only: the inspection is finalised. Select annotations to see their details; zoom and pan are available.";
+
 export function AnnotationWorkspace({
   photo,
   imageUrl,
   recordedBy,
+  readOnly = false,
   sidebar,
 }: {
   photo: PhotoRecord;
   /** Object URL of the original image. */
   imageUrl: string;
   recordedBy: string;
+  /** Finalised inspection: annotations can be selected and viewed, but not created, moved, resized or deleted. */
+  readOnly?: boolean;
   /** Extra cards shown below the annotation panel. */
   sidebar?: ReactNode;
 }) {
   const { items, load, save, create, update, setLabel, remove, retry } = useAnnotations(photo, recordedBy);
-  const [tool, setTool] = useState<Tool>("select");
+  const [selectedTool, setTool] = useState<Tool>("select");
+  const tool: Tool = readOnly ? "select" : selectedTool;
   const [rawSelectedId, setSelectedId] = useState<ID | null>(null);
   // A selection whose annotation disappeared (e.g. reverted after a failed save) counts as none.
   const selectedId = rawSelectedId && items.some((a) => a.id === rawSelectedId) ? rawSelectedId : null;
@@ -140,10 +147,14 @@ export function AnnotationWorkspace({
   );
   const resetView = useCallback(() => setView(INITIAL_VIEW), []);
 
-  const changeTool = useCallback((next: Tool) => {
-    setTool(next);
-    if (next !== "select") setSelectedId(null);
-  }, []);
+  const changeTool = useCallback(
+    (next: Tool) => {
+      if (readOnly && next !== "select") return;
+      setTool(next);
+      if (next !== "select") setSelectedId(null);
+    },
+    [readOnly],
+  );
 
   /** Image geometry for a pointer event: normalised position plus tolerances. */
   function measure(event: PointerEvent<HTMLDivElement>) {
@@ -178,7 +189,7 @@ export function AnnotationWorkspace({
     }
 
     const selected = items.find((a) => a.id === selectedId);
-    if (selected?.shape.kind === "rect") {
+    if (!readOnly && selected?.shape.kind === "rect") {
       const handle = hitHandle(selected.shape, m.point, m.tolerance);
       if (handle) {
         drag.current = { kind: "resize", pointerId, id: selected.id, original: selected.shape, handle };
@@ -193,7 +204,8 @@ export function AnnotationWorkspace({
     if (hit) {
       const target = items.find((a) => a.id === hit);
       setSelectedId(hit);
-      if (target) {
+      // Read-only: selecting shows details, but the shape cannot be dragged.
+      if (target && !readOnly) {
         drag.current = {
           kind: "move",
           pointerId,
@@ -219,10 +231,12 @@ export function AnnotationWorkspace({
       // Hover feedback only.
       if (tool !== "select") return setCursor("crosshair");
       const selected = items.find((a) => a.id === selectedId);
-      const handle = selected?.shape.kind === "rect" ? hitHandle(selected.shape, m.point, m.tolerance) : undefined;
+      const handle =
+        !readOnly && selected?.shape.kind === "rect" ? hitHandle(selected.shape, m.point, m.tolerance) : undefined;
       if (handle) return setCursor(HANDLE_CURSORS[handle]);
       const hit = hitTest(items.map((a) => ({ id: a.id, shape: a.shape })), m.point, m.tolerance);
-      return setCursor(hit ? "move" : effectiveView.zoom > 1 ? "grab" : "default");
+      if (hit) return setCursor(readOnly ? "pointer" : "move");
+      return setCursor(effectiveView.zoom > 1 ? "grab" : "default");
     }
     if (event.pointerId !== d.pointerId) return;
 
@@ -323,13 +337,15 @@ export function AnnotationWorkspace({
           onZoomOut={() => zoomBy(-1)}
           onResetView={resetView}
           save={save}
+          readOnly={readOnly}
         />
         <div
           ref={viewportRef}
           data-testid="annotation-viewport"
           data-tool={tool}
+          data-read-only={readOnly || undefined}
           tabIndex={0}
-          aria-label={`Annotation workspace for ${photo.fileName}. ${TOOL_HINTS[tool]}`}
+          aria-label={`Annotation workspace for ${photo.fileName}. ${readOnly ? READ_ONLY_HINT : TOOL_HINTS[tool]}`}
           role="application"
           // Sized to the photo's aspect ratio (no letterboxing at 100%), capped for tall portraits.
           className="relative max-h-[70vh] min-h-56 w-full touch-none select-none overflow-hidden rounded-lg bg-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
@@ -366,12 +382,13 @@ export function AnnotationWorkspace({
                 selectedId={selectedId}
                 draft={preview?.id === "draft" ? preview.shape : null}
                 pixel={pixel}
+                showHandles={!readOnly}
               />
             </div>
           ) : null}
         </div>
         <p className="text-xs text-slate-500" data-testid="tool-hint">
-          {TOOL_HINTS[tool]} Coordinates are saved relative to the original image.
+          {readOnly ? READ_ONLY_HINT : `${TOOL_HINTS[tool]} Coordinates are saved relative to the original image.`}
         </p>
         {dimensionWarning ? (
           <Callout tone="warning" title="Image size differs from the recorded metadata">
@@ -409,6 +426,7 @@ export function AnnotationWorkspace({
               remove(id);
               setSelectedId(null);
             }}
+            readOnly={readOnly}
             damagedCount={load.status === "ready" ? load.damagedCount : 0}
           />
         )}

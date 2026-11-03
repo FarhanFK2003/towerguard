@@ -81,3 +81,54 @@ export function applyInspectionPatch(
     updatedAt: now.toISOString(),
   });
 }
+
+// ---- Review lifecycle -----------------------------------------------------
+//
+//   draft → in_review → finalised, and finalised → in_review (reopen).
+// Finalised means the inspector completed the documentation; it is not a
+// structural safety or engineering assessment.
+
+export type LifecycleResult = { ok: true; value: Inspection } | { ok: false; error: string };
+
+/** draft → in_review: fieldwork complete; still editable. */
+export function startInspectionReview(inspection: Inspection, now: Date = new Date()): LifecycleResult {
+  if (inspection.status !== "draft") {
+    return { ok: false, error: "Only a draft inspection can start review." };
+  }
+  return { ok: true, value: { ...inspection, status: "in_review", updatedAt: now.toISOString() } };
+}
+
+/**
+ * in_review → finalised, recording who finalised and when. Readiness must be
+ * checked separately (see `assessReadiness`).
+ */
+export function finaliseInspectionRecord(
+  inspection: Inspection,
+  finalisedBy: string,
+  now: Date = new Date(),
+): LifecycleResult {
+  if (inspection.status !== "in_review") {
+    return { ok: false, error: "Only an inspection in review can be finalised." };
+  }
+  if (finalisedBy.trim() === "") return { ok: false, error: "The inspector's name is required to finalise." };
+  const timestamp = now.toISOString();
+  return {
+    ok: true,
+    value: {
+      ...inspection,
+      status: "finalised",
+      finalisation: { finalisedBy, finalisedAt: timestamp },
+      updatedAt: timestamp,
+    },
+  };
+}
+
+/** finalised → in_review: clears the finalisation and restores editing. */
+export function reopenInspectionRecord(inspection: Inspection, now: Date = new Date()): LifecycleResult {
+  if (inspection.status !== "finalised") {
+    return { ok: false, error: "Only a finalised inspection can be reopened." };
+  }
+  const value: Inspection = { ...inspection, status: "in_review", updatedAt: now.toISOString() };
+  delete value.finalisation;
+  return { ok: true, value };
+}

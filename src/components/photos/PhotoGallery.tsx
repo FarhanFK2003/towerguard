@@ -21,9 +21,12 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 
 export function PhotoGallery({
   inspectionId,
+  readOnly = false,
   onStorageChanged,
 }: {
   inspectionId: ID;
+  /** Finalised inspection: photographs can be viewed but not added. */
+  readOnly?: boolean;
   /** Called after photographs are stored, so storage usage can be re-read. */
   onStorageChanged?: () => void;
 }) {
@@ -71,59 +74,69 @@ export function PhotoGallery({
         }
         icon={<Images />}
         action={
-          <Button size="sm" onClick={openPicker} disabled={busy}>
-            {busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Upload aria-hidden="true" />}
-            {busy ? "Uploading…" : "Upload photographs"}
-          </Button>
+          readOnly ? undefined : (
+            <Button size="sm" onClick={openPicker} disabled={busy}>
+              {busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Upload aria-hidden="true" />}
+              {busy ? "Uploading…" : "Upload photographs"}
+            </Button>
+          )
         }
       />
-      <input
-        ref={inputRef}
-        type="file"
-        multiple
-        accept={PHOTO_ACCEPT}
-        className="sr-only"
-        tabIndex={-1}
-        aria-label="Choose photographs to upload"
-        onChange={(event) => {
-          const files = Array.from(event.target.files ?? []);
-          event.target.value = ""; // allow selecting the same file again
-          void upload(files);
-        }}
-      />
+      {readOnly ? null : (
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          accept={PHOTO_ACCEPT}
+          className="sr-only"
+          tabIndex={-1}
+          aria-label="Choose photographs to upload"
+          onChange={(event) => {
+            const files = Array.from(event.target.files ?? []);
+            event.target.value = ""; // allow selecting the same file again
+            void upload(files);
+          }}
+        />
+      )}
       <CardBody className="space-y-4">
-        <div
-          role="group"
-          aria-label="Photo drop zone"
-          onDragEnter={onDragOver}
-          onDragOver={onDragOver}
-          onDragLeave={onDragLeave}
-          onDrop={onDrop}
-          className={cn(
-            "flex flex-col items-center justify-center rounded-lg border-2 border-dashed px-4 text-center transition-colors",
-            empty ? "py-10" : "py-5",
-            dragActive ? "border-amber-500 bg-amber-50" : "border-slate-300 bg-slate-50/60",
-          )}
-        >
-          <ImageUp className={cn("text-slate-400", empty ? "size-8" : "size-6")} aria-hidden="true" />
-          {empty ? <p className="mt-3 text-sm font-semibold text-slate-900">No photographs yet</p> : null}
-          <p className={cn("text-sm text-slate-600", empty ? "mt-1" : "mt-2")}>
-            Drag and drop photographs here, or{" "}
-            <button
-              type="button"
-              onClick={openPicker}
-              disabled={busy}
-              className="rounded font-medium text-amber-700 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-amber-500 disabled:opacity-50"
-            >
-              browse files
-            </button>
-            .
+        {readOnly ? (
+          <p className="text-sm text-slate-500" data-testid="uploads-disabled">
+            The inspection is finalised, so photographs cannot be added. Originals remain viewable and downloadable.
           </p>
-          <p className="mt-1 text-xs text-slate-500">
-            JPEG, PNG or WebP, up to {formatBytes(MAX_PHOTO_BYTES)} each. Originals are kept byte-for-byte and
-            fingerprinted with SHA-256.
-          </p>
-        </div>
+        ) : (
+          <div
+            role="group"
+            aria-label="Photo drop zone"
+            onDragEnter={onDragOver}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
+            className={cn(
+              "flex flex-col items-center justify-center rounded-lg border-2 border-dashed px-4 text-center transition-colors",
+              empty ? "py-10" : "py-5",
+              dragActive ? "border-amber-500 bg-amber-50" : "border-slate-300 bg-slate-50/60",
+            )}
+          >
+            <ImageUp className={cn("text-slate-400", empty ? "size-8" : "size-6")} aria-hidden="true" />
+            {empty ? <p className="mt-3 text-sm font-semibold text-slate-900">No photographs yet</p> : null}
+            <p className={cn("text-sm text-slate-600", empty ? "mt-1" : "mt-2")}>
+              Drag and drop photographs here, or{" "}
+              <button
+                type="button"
+                onClick={openPicker}
+                disabled={busy}
+                className="rounded font-medium text-amber-700 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-amber-500 disabled:opacity-50"
+              >
+                browse files
+              </button>
+              .
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              JPEG, PNG or WebP, up to {formatBytes(MAX_PHOTO_BYTES)} each. Originals are kept byte-for-byte and
+              fingerprinted with SHA-256.
+            </p>
+          </div>
+        )}
 
         {items.length > 0 ? <UploadResults items={items} busy={busy} onDismiss={clear} /> : null}
 

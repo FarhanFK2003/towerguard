@@ -13,7 +13,16 @@ import { updatePhotoDetails } from "@/lib/storage/photos";
 
 const VIEWPOINT_HINT = 'Where the photo was taken from, e.g. "North face, upper section".';
 
-export function PhotoDetailsForm({ photo, onSaved }: { photo: PhotoRecord; onSaved: (updated: PhotoRecord) => void }) {
+export function PhotoDetailsForm({
+  photo,
+  readOnly = false,
+  onSaved,
+}: {
+  photo: PhotoRecord;
+  /** Finalised inspection: details are shown but cannot be changed. */
+  readOnly?: boolean;
+  onSaved: (updated: PhotoRecord) => void;
+}) {
   const [caption, setCaption] = useState(photo.caption ?? "");
   const [viewpoint, setViewpoint] = useState(photo.viewpoint ?? "");
   const [errors, setErrors] = useState<FieldErrors<keyof PhotoDetails>>({});
@@ -63,7 +72,7 @@ export function PhotoDetailsForm({ photo, onSaved }: { photo: PhotoRecord; onSav
           maxLength={PHOTO_DETAIL_LIMITS.caption}
           invalid={Boolean(errors.caption)}
           aria-describedby={describedBy("photo-caption", { error: errors.caption })}
-          disabled={saving}
+          disabled={saving || readOnly}
           onChange={(e) => {
             setCaption(e.target.value);
             setSavedAt(null);
@@ -77,25 +86,29 @@ export function PhotoDetailsForm({ photo, onSaved }: { photo: PhotoRecord; onSav
           maxLength={PHOTO_DETAIL_LIMITS.viewpoint}
           invalid={Boolean(errors.viewpoint)}
           aria-describedby={describedBy("photo-viewpoint", { error: errors.viewpoint, hint: VIEWPOINT_HINT })}
-          disabled={saving}
+          disabled={saving || readOnly}
           onChange={(e) => {
             setViewpoint(e.target.value);
             setSavedAt(null);
           }}
         />
       </Field>
-      <div className="flex items-center justify-end gap-3">
-        {savedAt && !dirty ? (
-          <p className="inline-flex items-center gap-1 text-sm text-emerald-700" role="status">
-            <CircleCheck className="size-4" aria-hidden="true" />
-            Saved
-          </p>
-        ) : null}
-        <Button type="submit" size="sm" disabled={saving || !dirty}>
-          {saving ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
-          {saving ? "Saving…" : "Save details"}
-        </Button>
-      </div>
+      {readOnly ? (
+        <p className="text-xs text-slate-500">The inspection is finalised, so these details cannot be changed.</p>
+      ) : (
+        <div className="flex items-center justify-end gap-3">
+          {savedAt && !dirty ? (
+            <p className="inline-flex items-center gap-1 text-sm text-emerald-700" role="status">
+              <CircleCheck className="size-4" aria-hidden="true" />
+              Saved
+            </p>
+          ) : null}
+          <Button type="submit" size="sm" disabled={saving || !dirty}>
+            {saving ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
+            {saving ? "Saving…" : "Save details"}
+          </Button>
+        </div>
+      )}
     </form>
   );
 }

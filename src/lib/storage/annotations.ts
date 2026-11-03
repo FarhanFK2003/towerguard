@@ -5,6 +5,7 @@ import type { Annotation, ID } from "@/lib/domain/types";
 import { INDEXES, STORES, requestToPromise, withTransaction } from "./db";
 import { StorageError } from "./errors";
 import { pruneFindingEvidence } from "./findings";
+import { assertInspectionEditable } from "./guards";
 import type { DamagedRecord } from "./inspections";
 
 function annotationNotFound(id: ID): StorageError {
@@ -23,9 +24,10 @@ export async function createAnnotation(annotation: Annotation): Promise<Annotati
     throw new StorageError("invalid_record", "The annotation is invalid and was not saved.");
   }
   await withTransaction(
-    [STORES.photos, STORES.annotations],
+    [STORES.inspections, STORES.photos, STORES.annotations],
     "readwrite",
     async (tx) => {
+      await assertInspectionEditable(tx, annotation.inspectionId);
       const photo = await requestToPromise<unknown>(tx.objectStore(STORES.photos).get(annotation.photoId));
       if (photo === undefined) {
         throw new StorageError("not_found", "The photograph no longer exists, so the annotation was not saved.");
@@ -89,7 +91,7 @@ export async function getAnnotation(id: ID): Promise<Annotation | undefined> {
 /** Changes an annotation's shape and/or label. Invalid results are rejected unsaved. */
 export async function updateAnnotation(id: ID, patch: AnnotationPatch, now: Date = new Date()): Promise<Annotation> {
   return withTransaction(
-    STORES.annotations,
+    [STORES.inspections, STORES.annotations],
     "readwrite",
     async (tx) => {
       const store = tx.objectStore(STORES.annotations);
@@ -98,6 +100,7 @@ export async function updateAnnotation(id: ID, patch: AnnotationPatch, now: Date
       if (!isAnnotation(existing)) {
         throw new StorageError("invalid_record", "The stored annotation is damaged and cannot be updated.");
       }
+      await assertInspectionEditable(tx, existing.inspectionId);
       const updated = applyAnnotationPatch(existing, patch, now);
       if (!isAnnotation(updated)) {
         throw new StorageError("invalid_record", "The change would make the annotation invalid and was not saved.");
@@ -115,14 +118,16 @@ export async function updateAnnotation(id: ID, patch: AnnotationPatch, now: Date
  */
 export async function deleteAnnotation(id: ID): Promise<void> {
   await withTransaction(
-    [STORES.annotations, STORES.findings],
+    [STORES.inspections, STORES.annotations, STORES.findings],
     "readwrite",
     async (tx) => {
       const store = tx.objectStore(STORES.annotations);
       const existing = await requestToPromise<unknown>(store.get(id));
       if (existing === undefined) throw annotationNotFound(id);
-      await requestToPromise(store.delete(id));
       const inspectionId = (existing as { inspectionId?: unknown }).inspectionId;
+      // Lock check before any write: neither the annotation nor finding links change if finalised.
+      if (typeof inspectionId === "string") await assertInspectionEditable(tx, inspectionId, { allowMissing: true });
+      await requestToPromise(store.delete(id));
       if (typeof inspectionId === "string") {
         await pruneFindingEvidence(tx, inspectionId, (evidence) => detachAnnotation(evidence, id));
       }

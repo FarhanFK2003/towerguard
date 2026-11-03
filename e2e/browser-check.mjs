@@ -935,16 +935,17 @@ async function findingsWorkflow() {
     JSON.stringify(f2.evidence),
   );
 
-  // 9–10. Edit: title, priority and status (with the confirmed explanation shown).
+  // 9–10. Edit title and priority; then confirm through the review panel (status is not part of the edit form).
   await typeInto("#finding-title", "Loose fastener at platform bracket (re-checked)", true);
   await realClick(el('[data-choice="priority:urgent"]'));
-  await realClick(el('[data-choice="status:confirmed"]'));
-  record("Status choices explain that confirmed is not an engineering certification", await evaluate(bodyHas("Reviewed and accepted by the inspector. This is not an engineering certification.")));
+  record("Status explanations say confirmed is not an engineering certification", await evaluate(bodyHas("Reviewed and accepted by the inspector. This is not an engineering certification.")));
   await realClick(elByText("button", "Save changes"));
-  await waitFor(`${bodyHas("Saved")} && !!${el('[data-testid="finding-review"]')}`, "edit saved");
+  await waitFor(bodyHas("Saved"), "edit saved");
+  await realClick(elByText('[data-testid="finding-review-panel"] button', "Confirm finding"));
+  await waitFor(`!!${el('[data-testid="finding-review"]')}`, "confirmed via review panel");
   f2 = (await findingsOf(inspectionId)).find((f) => f.id === f2Id);
   record(
-    "Edit saves title, priority and status; confirmation records the reviewer; engineering rating unchanged",
+    "Edit saves title and priority; confirming via the review panel records the reviewer; engineering rating unchanged",
     f2.title === "Loose fastener at platform bracket (re-checked)" && f2.inspectorPriority === "urgent" && f2.status === "confirmed" &&
       f2.review?.reviewedBy === "Field Inspector" && f2.engineeringSeverity === "not_assessed",
   );
@@ -989,13 +990,17 @@ async function findingsWorkflow() {
   );
   await realClick(elByText("button", "Clear filters"));
 
-  // Overview summary counts.
+  // Overview summary counts. The evidence removal above changed f2 after its review, so it is out of date.
   await navigate(`/inspections/${inspectionId}`);
-  await waitFor(`!!${el('[data-summary-status="confirmed"]')}`, "summary counts");
-  const summary = await evaluate(`Object.fromEntries([...document.querySelectorAll("[data-summary-status],[data-summary-priority]")].map((li) => [li.dataset.summaryStatus ?? li.dataset.summaryPriority, li.textContent.match(/(\\d+)$/)?.[1]]))`);
+  await waitFor(`!!${el('[data-summary-review="outOfDate"]')}`, "summary counts");
+  const summary = await evaluate(`Object.fromEntries([
+    ...${visibleAll("[data-summary-review]")}.map((e) => [e.dataset.summaryReview, e.textContent.trim()]),
+    ...${visibleAll("[data-summary-priority]")}.map((li) => [li.dataset.summaryPriority, li.textContent.match(/(\\d+)$/)?.[1]]),
+  ])`);
   record(
-    "Overview summary counts findings by status and priority",
-    summary.observation === "1" && summary.confirmed === "1" && summary.dismissed === "0" && summary.urgent === "1" && summary.high === "1",
+    "Overview summary counts findings by review state and priority",
+    summary.total === "2" && summary.unreviewed === "1" && summary.confirmed === "0" && summary.dismissed === "0" &&
+      summary.outOfDate === "1" && summary.urgent === "1" && summary.high === "1",
     JSON.stringify(summary),
   );
 
@@ -1053,6 +1058,247 @@ async function findingsWorkflow() {
   await screenshot("21-finding-detail-mobile");
   await send("Emulation.clearDeviceMetricsOverride");
   record("Findings list and finding page at 390px: no horizontal overflow", !listOverflow && !detailOverflow, `list=${listOverflow} detail=${detailOverflow}`);
+  return { inspectionId, jpg, f2Id, r1 };
+}
+
+// ---- Review and finalisation ------------------------------------------------
+
+async function reviewAndFinalisation({ inspectionId, jpg, f2Id, r1 }) {
+  const overview = `/inspections/${inspectionId}`;
+  const findingsBase = `${overview}/findings`;
+  const card = el('[data-testid="inspection-review-card"]');
+  const panel = el('[data-testid="finding-review-panel"]');
+  const inspectionRecord = async () => (await evaluate(readInspectionStore)).find((i) => i.id === inspectionId);
+  const finding = async (id) => (await findingsOf(inspectionId)).find((f) => f.id === id);
+  const cardStatus = (status) => `${card}?.dataset.inspectionStatus === "${status}"`;
+
+  // 1–2. Open the existing draft inspection and start review.
+  await navigate(overview);
+  await waitFor(cardStatus("draft"), "draft review card");
+  await realClick(elByText('[data-testid="inspection-review-card"] button', "Start review"));
+  await waitFor(cardStatus("in_review"), "in review");
+  record("Review: Start review moves the draft inspection to In review", (await inspectionRecord()).status === "in_review");
+
+  // 3. Create two more findings (no evidence) through the form.
+  async function createFinding(title, description, category, priority) {
+    await navigate(overview);
+    const newLink = `${el('[data-testid="findings-summary"]')}?.querySelector('a[href$="/findings/new"]')`;
+    await waitFor(`!!${newLink}`, "summary New finding link");
+    await realClick(newLink);
+    await waitFor(`location.pathname.endsWith("/findings/new") && !!${el("#finding-title")}`, "new finding form");
+    await typeInto("#finding-title", title);
+    await typeInto("#finding-description", description);
+    await chooseOption("#finding-category", category);
+    await realClick(el(`[data-choice="priority:${priority}"]`));
+    await realClick(elByText("button", "Create finding"));
+    await waitFor(`/\\/findings\\/[0-9a-f-]{36}$/.test(location.pathname)`, `saved ${title}`);
+    return evaluate(`location.pathname.split("/").pop()`);
+  }
+  const f3 = await createFinding("Missing bolt at platform splice", "One bolt missing from the splice plate.", "missing_fastener", "high");
+  const f4 = await createFinding("Possible bird nest on antenna mount", "Debris visible near the antenna mount.", "bird_nest", "low");
+  record(
+    "Review: new findings are created as observations (status is not set in the form)",
+    (await finding(f3)).status === "observation" && (await finding(f4)).status === "observation",
+  );
+
+  // 4. Confirm a finding with a review note.
+  await navigate(`${findingsBase}/${f3}`);
+  await waitFor(`!!${panel}`, "f3 review panel");
+  await typeInto("#review-note", "Verified on the north-face photograph.");
+  await realClick(elByText('[data-testid="finding-review-panel"] button', "Confirm finding"));
+  await waitFor(`${panel}.dataset.reviewState === "current" && ${bodyHas("Review saved")}`, "f3 confirmed");
+  let r3 = await finding(f3);
+  record(
+    "Review: confirm records reviewer, time and note, with reviewedAt equal to updatedAt",
+    r3.status === "confirmed" && r3.review?.reviewedBy === "Field Inspector" && r3.review?.note === "Verified on the north-face photograph." &&
+      r3.review.reviewedAt === r3.updatedAt && (await evaluate(`${el('[data-testid="review-note-saved"]')}?.textContent === "Verified on the north-face photograph."`)),
+  );
+
+  // 6. Dismissing without a reason is refused.
+  await navigate(`${findingsBase}/${f4}`);
+  await waitFor(`!!${panel}`, "f4 review panel");
+  await realClick(elByText('[data-testid="finding-review-panel"] button', "Dismiss finding"));
+  await waitFor(bodyHas("A reason is required to dismiss a finding."), "dismiss validation");
+  record("Review: dismissing without a reason shows a validation error and saves nothing", (await finding(f4)).status === "observation");
+
+  // 5. Dismiss with a reason.
+  await typeInto("#review-note", "Debris only; no nest present on closer inspection.");
+  await realClick(elByText('[data-testid="finding-review-panel"] button', "Dismiss finding"));
+  await waitFor(`${panel}.dataset.reviewState === "current"`, "f4 dismissed");
+  const r4 = await finding(f4);
+  record("Review: dismiss with a reason records it", r4.status === "dismissed" && r4.review?.note === "Debris only; no nest present on closer inspection.");
+
+  // 7–8. Edit a reviewed finding: it is flagged as edited after review.
+  await navigate(`${findingsBase}/${f3}`);
+  await waitFor(`${panel}?.dataset.reviewState === "current"`, "f3 page");
+  await typeInto("#finding-recommendedAction", "Replace the missing bolt and re-torque the splice.");
+  await realClick(elByText("button", "Save changes"));
+  await waitFor(`!!${el('[data-testid="stale-review-warning"]')}`, "stale warning");
+  r3 = await finding(f3);
+  record(
+    "Review: editing a reviewed finding shows 'Edited after review. This finding needs to be reviewed again.'",
+    (await evaluate(bodyHas("Edited after review. This finding needs to be reviewed again."))) &&
+      Date.parse(r3.updatedAt) > Date.parse(r3.review.reviewedAt),
+  );
+
+  // 9–10. Needs-review filter and next-finding navigation.
+  await navigate(findingsBase);
+  await waitFor(`!!${el('[data-testid="filter-needs-review"]')}`, "findings list");
+  await realClick(el('[data-testid="filter-needs-review"]'));
+  await waitFor(`${el('[data-testid="filter-needs-review"]')}.getAttribute("aria-pressed") === "true"`, "needs review filter on");
+  const needing = await evaluate(`${visibleAll("[data-finding-id]")}.map((a) => a.dataset.findingId)`);
+  record(
+    "Review: Needs review lists the stale reviews only (current confirmations and dismissals excluded)",
+    JSON.stringify(needing) === JSON.stringify([f3, f2Id]),
+    JSON.stringify(needing),
+  );
+  await screenshot("22-needs-review-filter");
+  await realClick(el('[data-testid="next-needing-review"]'));
+  await waitFor(`location.pathname === "${findingsBase}/${f3}" && !!${panel}`, "next needing review");
+  record("Review: 'Next finding needing review' opens the first one in list order", true);
+
+  // 11. Review the stale finding again.
+  await realClick(elByText('[data-testid="stale-review-warning"] button', "Review again"));
+  await realClick(elByText('[data-testid="finding-review-panel"] button', "Confirm again"));
+  await waitFor(`${panel}.dataset.reviewState === "current" && !${el('[data-testid="stale-review-warning"]')}`, "f3 re-reviewed");
+  record("Review: reviewing again clears the edited-after-review warning", (await finding(f3)).review.reviewedAt === (await finding(f3)).updatedAt);
+
+  // 12–13. Finalisation is blocked while f2's review is out of date.
+  await navigate(overview);
+  await waitFor(`${cardStatus("in_review")} && !!${el('[data-testid="readiness-blockers"]')}`, "blockers");
+  record(
+    "Review: the readiness card explains the blocker and finalisation is disabled",
+    (await evaluate(`!!${el('[data-blocker="out_of_date_reviews"]')}`)) &&
+      (await evaluate(`${elByText('[data-testid="inspection-review-card"] button', "Finalise inspection")}.disabled`)) &&
+      (await evaluate(bodyHas("Resolve the issues above to finalise."))),
+  );
+  await screenshot("23-readiness-blocked");
+
+  // 14. Resolve: open the remaining finding from the card and confirm it again.
+  await realClick(elByText('[data-testid="inspection-review-card"] a', "Review next finding"));
+  await waitFor(`location.pathname === "${findingsBase}/${f2Id}" && !!${panel}`, "f2 from card");
+  await realClick(elByText('[data-testid="finding-review-panel"] button', "Confirm again"));
+  await waitFor(`${panel}.dataset.reviewState === "current"`, "f2 re-reviewed");
+
+  // Visit pages through client navigation so they are cached (hidden) before finalising.
+  await realClick(elByText("main a", "Findings"));
+  await waitFor(`location.pathname === "${findingsBase}"`, "list (client)");
+  await realClick(elByText("main a", "Inspection"));
+  await waitFor(`location.pathname === "${overview}" && !!${card}`, "overview (client)");
+  await realClick(el(`a[data-photo-id="${jpg.id}"]`));
+  await waitFor(`location.pathname === "${overview}/photos/${jpg.id}" && ${STAGE_IMG}?.complete`, "photo (client)");
+  await realClick(elByText("main a", "Inspection"));
+  await waitFor(`location.pathname === "${overview}" && !${el('[data-blocker]')} && !!${el('[data-testid="readiness-warnings"]')}`, "ready with warnings");
+
+  // 15–16. A warning (confirmed finding without evidence) must be acknowledged, then finalise.
+  const finaliseDisabled = () => evaluate(`${elByText('[data-testid="inspection-review-card"] button', "Finalise inspection")}.disabled`);
+  record(
+    "Review: warnings require explicit acknowledgement before finalising",
+    (await evaluate(`!!${el('[data-warning="confirmed_without_evidence"]')}`)) && (await finaliseDisabled()),
+  );
+  await realClick(el('[data-testid="acknowledge-warnings"]'));
+  await waitFor(`!${elByText('[data-testid="inspection-review-card"] button', "Finalise inspection")}.disabled`, "finalise enabled");
+  await screenshot("24-ready-to-finalise");
+  await realClick(elByText('[data-testid="inspection-review-card"] button', "Finalise inspection"));
+  await waitFor(`${cardStatus("finalised")} && !!${el('[data-testid="read-only-banner"]')}`, "finalised");
+  let stored = await inspectionRecord();
+  record(
+    "Review: finalising records the inspector and time",
+    stored.status === "finalised" && stored.finalisation?.finalisedBy === "Field Inspector" && Boolean(stored.finalisation?.finalisedAt),
+    JSON.stringify(stored.finalisation),
+  );
+  await screenshot("25-finalised-overview");
+
+  // 18–20. Previously visited (cached) pages show the read-only state, with no stale editable controls.
+  record(
+    "Read-only: overview has no upload controls",
+    !(await evaluate(`!!${elByText("button", "Upload photographs")}`)) && (await evaluate(`!!${el('[data-testid="uploads-disabled"]')}`)),
+  );
+  await realClick(el(`a[data-photo-id="${jpg.id}"]`));
+  await waitFor(`location.pathname === "${overview}/photos/${jpg.id}" && ${el('[data-testid="annotation-viewport"]')}?.dataset.readOnly === "true"`, "cached photo page read-only");
+  await realClick(el(`[data-annotation-item="${r1.id}"]`));
+  await waitFor(`!!${el('[data-testid="annotation-details"]')}`, "annotation details");
+  const annBefore = JSON.stringify((await evaluate(readAnnotations)).find((a) => a.id === r1.id));
+  const shape = (await evaluate(readAnnotations)).find((a) => a.id === r1.id).shape;
+  await evaluate(`${el('[data-testid="annotation-viewport"]')}.scrollIntoView({ block: "center" })`);
+  const from = await imagePoint(shape.x + shape.width / 2, shape.y + shape.height / 2);
+  await mouseDrag(from, { x: from.x + 60, y: from.y + 40 }); // genuine drag attempt on the annotation
+  await delay(300);
+  record(
+    "Read-only: photo page (cached) has the banner, no drawing tools, delete, label editing or caption editing; a real drag moves nothing",
+    (await evaluate(`!!${el('[data-testid="read-only-banner"]')}`)) &&
+      (await evaluate(`${elByText('[role="toolbar"] button', "Rectangle")}.disabled && ${elByText('[role="toolbar"] button', "Point")}.disabled`)) &&
+      !(await evaluate(`!!${elByText("main button", "Delete annotation")}`)) &&
+      !(await evaluate(`!!${elByText("main button", "Delete")}`)) &&
+      (await evaluate(`${el("#annotation-label")}.disabled && ${el("#photo-caption")}.disabled`)) &&
+      !(await evaluate(`!!${elByText("button", "Save details")}`)) &&
+      !(await evaluate(`!!${el('[data-testid="create-finding-from-annotation"]')}`)) &&
+      JSON.stringify((await evaluate(readAnnotations)).find((a) => a.id === r1.id)) === annBefore &&
+      (await evaluate(`!!${elByText("main a", "Download original")}`)),
+  );
+  await realClick(elByText("main a", "Inspection"));
+  await waitFor(`location.pathname === "${overview}" && !!${card}`, "back to overview");
+  await realClick(`${el('[data-testid="findings-summary"]')}.querySelector('a[href="${findingsBase}"]')`);
+  await waitFor(`location.pathname === "${findingsBase}" && !!${el('[data-testid="read-only-banner"]')}`, "cached list read-only");
+  record("Read-only: findings list (cached) has the banner and no New finding", !(await evaluate(`!!${elByText("main a", "New finding")}`)));
+  await realClick(el(`[data-finding-id="${f2Id}"]`));
+  await waitFor(`location.pathname === "${findingsBase}/${f2Id}" && !!${el('[data-testid="read-only-banner"]')}`, "cached finding read-only");
+  record(
+    "Read-only: finding page (cached) has disabled fields, no Save, Delete, review, attach or remove actions",
+    (await evaluate(`${el("#finding-title")}.disabled && ${el("#finding-description")}.disabled && ${el("#finding-category")}.disabled`)) &&
+      !(await evaluate(`!!${el("[data-attach-photo]")} || !!${el("[data-remove-photo]")}`)) &&
+      !(await evaluate(`!!${elByText("button", "Save changes")}`)) &&
+      !(await evaluate(`!!${elByText("main button", "Delete")}`)) &&
+      !(await evaluate(`!!${elByText('[data-testid="finding-review-panel"] button', "Confirm")}`)) &&
+      (await evaluate(bodyHas("Review actions are unavailable while the inspection is finalised."))),
+  );
+  await navigate(`${findingsBase}/new`);
+  await waitFor(bodyHas("Findings cannot be added to a finalised inspection"), "new finding blocked");
+  record("Read-only: the New finding page refuses to create findings", !(await evaluate(`!!${el("#finding-title")}`)));
+
+  // 17. Refresh: finalisation persists.
+  await navigate(overview);
+  await reload();
+  await waitFor(`${cardStatus("finalised")} && !!${el('[data-testid="finalisation-details"]')}`, "finalised after reload");
+  record("Review: finalisation persists after refresh", (await inspectionRecord()).status === "finalised");
+
+  // 21–23. Reopen with confirmation: metadata cleared, editing restored.
+  await realClick(elByText('[data-testid="inspection-review-card"] button', "Reopen inspection"));
+  await waitFor(`!!${el("dialog[open]")}`, "reopen dialog");
+  await realClick(elByText("dialog[open] button", "Reopen inspection"));
+  await waitFor(`${cardStatus("in_review")} && !${el('[data-testid="read-only-banner"]')}`, "reopened");
+  stored = await inspectionRecord();
+  record("Review: reopening returns to In review and clears the finalisation metadata", stored.status === "in_review" && !("finalisation" in stored));
+  record("Review: after reopening, uploads are available again", await evaluate(`!!${elByText("button", "Upload photographs")}`));
+  await realClick(el(`a[data-photo-id="${jpg.id}"]`));
+  await waitFor(`location.pathname === "${overview}/photos/${jpg.id}" && !${el('[data-testid="annotation-viewport"]')}?.dataset.readOnly`, "editable photo page");
+  record(
+    "Review: after reopening, annotation tools and caption editing are restored",
+    await evaluate(`!${elByText('[role="toolbar"] button', "Rectangle")}.disabled && !${el("#photo-caption")}.disabled`),
+  );
+
+  // 24. Finalise again.
+  await realClick(elByText("main a", "Inspection"));
+  await waitFor(`${cardStatus("in_review")} && !!${el('[data-testid="acknowledge-warnings"]')}`, "ready again");
+  await realClick(el('[data-testid="acknowledge-warnings"]'));
+  await realClick(elByText('[data-testid="inspection-review-card"] button', "Finalise inspection"));
+  await waitFor(cardStatus("finalised"), "finalised again");
+  record("Review: the inspection can be finalised again", (await inspectionRecord()).status === "finalised");
+
+  // 25. 390 px.
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await reload();
+  await waitFor(`${cardStatus("finalised")}`, "mobile overview");
+  await delay(300);
+  const overviewOverflow = await evaluate(`document.documentElement.scrollWidth > window.innerWidth`);
+  await screenshot("26-finalised-mobile");
+  await navigate(`${findingsBase}/${f3}`);
+  await waitFor(`!!${panel}`, "mobile finding");
+  await delay(300);
+  const findingOverflow = await evaluate(`document.documentElement.scrollWidth > window.innerWidth`);
+  await screenshot("27-review-panel-mobile");
+  await send("Emulation.clearDeviceMetricsOverride");
+  record("Review: overview and review panel at 390px have no horizontal overflow", !overviewOverflow && !findingOverflow, `overview=${overviewOverflow} finding=${findingOverflow}`);
 }
 
 try {
@@ -1062,7 +1308,7 @@ try {
   await damagedRecords();
   await photoEvidence();
   await annotationWorkspace();
-  await findingsWorkflow();
+  await reviewAndFinalisation(await findingsWorkflow());
 } catch (error) {
   record("Browser run aborted", false, error.message);
   try {

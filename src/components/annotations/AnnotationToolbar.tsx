@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { CircleAlert, CircleCheck, LoaderCircle, MapPin, Maximize, MousePointer2, Square, ZoomIn, ZoomOut } from "lucide-react";
+import { CircleAlert, CircleCheck, LoaderCircle, Lock, MapPin, Maximize, MousePointer2, Square, ZoomIn, ZoomOut } from "lucide-react";
 import { MAX_ZOOM, MIN_ZOOM } from "@/lib/annotations/viewport";
 import { cn } from "@/lib/cn";
 import type { SaveState } from "./useAnnotations";
@@ -24,6 +24,7 @@ export function AnnotationToolbar({
   onZoomOut,
   onResetView,
   save,
+  readOnly = false,
 }: {
   tool: Tool;
   onToolChange: (tool: Tool) => void;
@@ -32,6 +33,8 @@ export function AnnotationToolbar({
   onZoomOut: () => void;
   onResetView: () => void;
   save: SaveState;
+  /** Only Select (for viewing) and zoom stay available. */
+  readOnly?: boolean;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-1.5 shadow-sm">
@@ -42,7 +45,8 @@ export function AnnotationToolbar({
               key={t}
               type="button"
               aria-pressed={tool === t}
-              title={`${label} (${shortcut})`}
+              title={readOnly && t !== "select" ? `${label} (unavailable: inspection finalised)` : `${label} (${shortcut})`}
+              disabled={readOnly && t !== "select"}
               onClick={() => onToolChange(t)}
               className={cn(
                 ICON_BUTTON,
@@ -73,7 +77,14 @@ export function AnnotationToolbar({
           </button>
         </div>
       </div>
-      <SaveStatus save={save} />
+      {readOnly ? (
+        <p className="inline-flex items-center gap-1.5 px-2 text-sm text-slate-600" data-testid="save-status" data-save-status="read-only">
+          <Lock className="size-4" aria-hidden="true" />
+          Read-only
+        </p>
+      ) : (
+        <SaveStatus save={save} />
+      )}
     </div>
   );
 }
