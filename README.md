@@ -37,7 +37,7 @@ npm run typecheck  # TypeScript, no emit
 
 ```
 src/
-  app/                 routes (App Router): /, /inspections/new, /inspections/[id] (+ /photos, /findings)
+  app/                 routes (App Router): /, /inspections/new, /inspections/[id] (+ /photos, /findings, /report)
   components/
     layout/            application shell, navigation, page header
     ui/                reusable primitives (Button, Badge, Card, Callout, Field, ConfirmDialog, …)
@@ -46,11 +46,14 @@ src/
     photos/            photo gallery, upload, viewer
     annotations/       annotation workspace: toolbar, SVG overlay, list
     findings/          findings list, editor, evidence selector, summary
+    report/            printable inspection report, annotated figures, JSON export panel
   hooks/               React hooks (client-side data loading)
   lib/
     annotations/       pure geometry and zoom/pan maths (unit-tested)
     domain/            typed models, enumerations, validation (framework-independent)
+    export/            versioned JSON export with verified originals (docs/export-format.md)
     photos/            file validation, SHA-256, thumbnails (browser APIs, no React)
+    report/            report model, canonical JSON, data fingerprint, image preparation
     storage/           IndexedDB wrapper and repositories (framework-independent)
 tests/                 Vitest unit tests (IndexedDB tests use fake-indexeddb)
 e2e/                   dependency-free browser checks (headless Edge/Chrome via DevTools Protocol)
@@ -107,3 +110,26 @@ shared between browsers or devices.
   possible with an explicit confirmation.
 - Finalising records that the inspector completed the documentation. It is not a structural safety or
   engineering assessment.
+
+## Reports and data export
+
+- **Inspection report** (`/inspections/[id]/report`): a read-only report generated from the stored
+  data. It covers inspection details, lifecycle status, summary counts, each finding with its review
+  and annotated photographic evidence, a photograph register with SHA-256 hashes, any data problems,
+  and the scope-and-limitations disclaimer. Opening, refreshing or printing it changes nothing.
+- Draft and in-review reports are marked **NOT FINAL**. Finalised reports say "Finalised documentation"
+  and state that this is not an engineering assessment. When printed, the status appears on every page.
+- **Report data fingerprint:** a SHA-256 hash of the canonical report data (inspection, photo metadata
+  including each original's hash, annotations, findings and reviews). The same data always gives the
+  same fingerprint, and any change gives a different one. It is shown on the report but never stored,
+  and it is not a digital signature.
+- **Print / Save as PDF** uses the browser's print dialog with fixed A4 paper and 14 mm margins. Photos
+  are prepared one at a time as print copies (longest edge at most 1,600 px; the originals are
+  untouched), and printing stays disabled until they are ready. Before printing, the report checks that
+  the stored data has not changed since it was generated; if it has, you are asked to refresh. Turn off
+  the browser's "Headers and footers" option so the report's own page labels are used.
+- **Export data (JSON)** is separate from the report. It writes a complete, versioned copy of the
+  inspection, including the original photographs verified against their SHA-256 hashes. It is refused
+  rather than produced incomplete when records are damaged, image data is missing or evidence links are
+  broken, and it warns before very large exports. See [docs/export-format.md](docs/export-format.md).
+  Importing is not supported yet.

@@ -8,7 +8,7 @@ import { WorkspaceNote } from "./WorkspaceNote";
 export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen">
-      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col bg-slate-950 lg:flex">
+      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col bg-slate-950 lg:flex print:hidden">
         <div className="border-b border-white/10 px-5 py-5">
           <Brand />
         </div>

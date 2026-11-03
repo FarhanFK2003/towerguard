@@ -9,7 +9,7 @@
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -1182,7 +1182,7 @@ async function reviewAndFinalisation({ inspectionId, jpg, f2Id, r1 }) {
 
   // Visit pages through client navigation so they are cached (hidden) before finalising.
   await realClick(elByText("main a", "Findings"));
-  await waitFor(`location.pathname === "${findingsBase}"`, "list (client)");
+  await waitFor(`location.pathname === "${findingsBase}" && !!${elByText("main a", "Inspection")}`, "list (client)");
   await realClick(elByText("main a", "Inspection"));
   await waitFor(`location.pathname === "${overview}" && !!${card}`, "overview (client)");
   await realClick(el(`a[data-photo-id="${jpg.id}"]`));
@@ -1301,6 +1301,327 @@ async function reviewAndFinalisation({ inspectionId, jpg, f2Id, r1 }) {
   record("Review: overview and review panel at 390px have no horizontal overflow", !overviewOverflow && !findingOverflow, `overview=${overviewOverflow} finding=${findingOverflow}`);
 }
 
+// ---- Reports and data export ------------------------------------------------
+
+/** JSON dump of every store (Blobs as size/type), plus the database version. */
+const dumpDatabase = `new Promise((resolve, reject) => {
+  const open = indexedDB.open("towerguard");
+  open.onerror = () => reject(open.error);
+  open.onsuccess = () => {
+    const db = open.result;
+    const names = [...db.objectStoreNames];
+    const tx = db.transaction(names, "readonly");
+    const out = { version: db.version };
+    for (const name of names) {
+      const r = tx.objectStore(name).getAll();
+      r.onsuccess = () => { out[name] = r.result; };
+    }
+    tx.oncomplete = () => { db.close(); resolve(JSON.stringify(out, (k, v) => (v instanceof Blob ? "Blob:" + v.size + ":" + v.type : v))); };
+    tx.onerror = () => reject(tx.error);
+  };
+})`;
+const putRecord = (storeName, record) => evaluate(withStore(storeName, "readwrite", `store.put(${JSON.stringify(record)});`));
+const deleteRecord = (storeName, key) => evaluate(withStore(storeName, "readwrite", `store.delete(${JSON.stringify(key)});`));
+const readAll = (storeName) => evaluate(withStore(storeName, "readonly", `const r = store.getAll(); r.onsuccess = () => { result = r.result; };`));
+
+const REPORT = el('[data-testid="inspection-report"]');
+const PRINT_BUTTON = el('[data-testid="report-print"]');
+const reportReady = `!!${REPORT} && !!${PRINT_BUTTON} && !${PRINT_BUTTON}.disabled && ${visibleAll('[data-image-status="preparing"]')}.length === 0`;
+const reportFingerprint = () => evaluate(`${el('[data-testid="report-fingerprint"]')}?.textContent.trim()`);
+
+/** Max distance (CSS px) between drawn annotation shapes and where the stored fractions place them on the image. */
+const reportAlignment = `(async () => {
+  const anns = await ${readAnnotations};
+  let worst = 0, count = 0;
+  for (const frame of ${visibleAll('[data-testid="report-figure-frame"]')}) {
+    const img = frame.querySelector("img");
+    if (!img) continue;
+    const ir = img.getBoundingClientRect();
+    for (const g of frame.querySelectorAll("[data-annotation-id]")) {
+      const a = anns.find((x) => x.id === g.dataset.annotationId);
+      if (!a) return { worst: Infinity, missing: g.dataset.annotationId };
+      const r = g.querySelector("[data-shape]").getBoundingClientRect();
+      const errors = a.shape.kind === "rect"
+        ? [r.left - (ir.left + a.shape.x * ir.width), r.top - (ir.top + a.shape.y * ir.height),
+           r.width - a.shape.width * ir.width, r.height - a.shape.height * ir.height]
+        : [r.left + r.width / 2 - (ir.left + a.shape.x * ir.width), r.top + r.height / 2 - (ir.top + a.shape.y * ir.height)];
+      worst = Math.max(worst, ...errors.map(Math.abs));
+      count += 1;
+    }
+  }
+  return { worst, count };
+})()`;
+
+function pdfInfo(buffer) {
+  const text = buffer.toString("latin1");
+  const counts = [...text.matchAll(/\/Type\s*\/Pages\b[^>]*?\/Count\s+(\d+)|\/Count\s+(\d+)[^>]*?\/Type\s*\/Pages\b/g)].map((m) => Number(m[1] ?? m[2]));
+  const box = text.match(/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/);
+  return {
+    isPdf: text.startsWith("%PDF-"),
+    pages: counts.length ? Math.max(...counts) : (text.match(/\/Type\s*\/Page(?!s)/g) ?? []).length,
+    width: box ? Number(box[1]) : 0,
+    height: box ? Number(box[2]) : 0,
+  };
+}
+
+async function printPdf(name) {
+  const { data } = await send("Page.printToPDF", { preferCSSPageSize: true, printBackground: true });
+  const buffer = Buffer.from(data, "base64");
+  writeFileSync(join(outDir, `${name}.pdf`), buffer);
+  return pdfInfo(buffer);
+}
+
+const isA4 = (info) => Math.abs(info.width - 595.28) < 2 && Math.abs(info.height - 841.89) < 2;
+
+async function reportsAndExport(inspectionId) {
+  const reportPath = `/inspections/${inspectionId}/report`;
+  const before = await evaluate(dumpDatabase);
+  const ofInspection = (records) => records.filter((r) => r.inspectionId === inspectionId);
+  const photos = ofInspection(await readAll("photos"));
+  const annotations = ofInspection(await readAll("annotations"));
+  const findings = ofInspection(await readAll("findings"));
+
+  // 1. Reached from the inspection overview and the findings list.
+  await navigate(`/inspections/${inspectionId}/findings`);
+  await waitFor(`!!${el('[data-testid="view-report"]')}`, "findings View report link");
+  record("Report: the findings list links to the report", await evaluate(`${el('[data-testid="view-report"]')}.getAttribute("href") === ${JSON.stringify(reportPath)}`));
+  await navigate(`/inspections/${inspectionId}`);
+  await waitFor(`!!${el('[data-testid="view-report"]')}`, "overview View report link");
+  await realClick(el('[data-testid="view-report"]'));
+  await waitFor(`location.pathname === ${JSON.stringify(reportPath)} && !!${REPORT}`, "report page");
+  record(
+    "Report: Print is disabled until every photograph is prepared",
+    await evaluate(`${PRINT_BUTTON}.disabled === (${visibleAll('[data-image-status="preparing"]')}.length > 0)`),
+  );
+  await waitFor(reportReady, "report images ready");
+  record(
+    "Report: every figure shows its prepared photograph",
+    await evaluate(`${visibleAll('[data-testid="report-figure-frame"]')}.every((f) => f.dataset.imageStatus === "ready" && f.querySelector("img")?.complete && f.querySelector("img").naturalWidth > 0)`),
+  );
+  const maxEdge = await evaluate(`Math.max(...${visibleAll('[data-testid="report-figure-frame"] img')}.map((i) => Math.max(i.naturalWidth, i.naturalHeight)))`);
+  record("Report: print copies are at most 1,600 px on the longest edge", maxEdge > 0 && maxEdge <= 1600, `max ${maxEdge}px`);
+  await screenshot("28-report-finalised");
+
+  // 2. Lifecycle banner, counts, fingerprint, findings, disclaimer.
+  const banner = el('[data-testid="report-status-banner"]');
+  record(
+    "Report: a finalised inspection is labelled 'Finalised documentation' and not an engineering assessment",
+    await evaluate(`${banner}.dataset.final === "true" && ${banner}.innerText.includes("Finalised documentation") && ${banner}.innerText.includes("not a structural safety or engineering assessment")`),
+  );
+  const counts = await evaluate(`Object.fromEntries(${visibleAll("[data-count]")}.map((e) => [e.dataset.count, Number(e.querySelector("dd").textContent)]))`);
+  record(
+    "Report: summary counts match the stored records",
+    counts.photos === photos.length && counts.annotations === annotations.length && counts.findings === findings.length && counts.issues === 0,
+    JSON.stringify(counts),
+  );
+  const fingerprint = await reportFingerprint();
+  record("Report: shows a 64-character SHA-256 report data fingerprint", /^[0-9a-f]{64}$/.test(fingerprint ?? ""), fingerprint);
+  const findingBlocks = await evaluate(`${visibleAll('[data-testid="report-finding"]')}.map((e) => ({ id: e.dataset.findingId, severity: e.querySelector('[data-testid="report-engineering-severity"]').textContent }))`);
+  record(
+    "Report: every finding is included with engineering severity 'Not assessed'",
+    findingBlocks.length === findings.length && findingBlocks.every((b) => b.severity === "Not assessed") && findings.every((f) => findingBlocks.some((b) => b.id === f.id)),
+    `${findingBlocks.length} blocks`,
+  );
+  record(
+    "Report: photo register lists every photograph with its SHA-256",
+    await evaluate(`${JSON.stringify(photos.map((p) => [p.id, p.sha256]))}.every(([id, sha]) => ${el('[data-testid="report-photo-table"]')}.querySelector('[data-photo-id="' + id + '"]')?.innerText.includes(sha))`),
+  );
+  const disclaimer = await evaluate(`${el('[data-testid="report-disclaimer"]')}?.innerText ?? ""`);
+  record(
+    "Report: includes the scope-and-limitations disclaimer",
+    ["recorded manually by the inspector", "not an engineering severity rating", "does not constitute structural certification", "does not establish that the inspected structure is safe"].every((s) => disclaimer.includes(s)),
+  );
+  record("Report: no data problems are reported for intact data", !(await evaluate(`!!${el('[data-testid="report-issues"]')}`)));
+  const evidenceFigures = await evaluate(`${visibleAll('[data-testid="report-evidence"]')}.map((e) => ({
+    findingId: e.closest('[data-testid="report-finding"]').dataset.findingId,
+    photoId: e.dataset.photoId,
+    shown: [...e.querySelectorAll("[data-annotation-id]")].map((g) => g.dataset.annotationId).sort(),
+    highlighted: [...e.querySelectorAll("[data-annotation-id]:not([data-dimmed])")].map((g) => g.dataset.annotationId).sort(),
+  }))`);
+  const expectedFigures = findings.flatMap((f) => f.evidence.map((link) => ({ findingId: f.id, link })));
+  record(
+    "Report: each evidence figure highlights exactly the finding's linked annotations and dims the others",
+    evidenceFigures.length === expectedFigures.length && evidenceFigures.length > 0 &&
+      expectedFigures.every(({ findingId, link }) => {
+        const figure = evidenceFigures.find((e) => e.findingId === findingId && e.photoId === link.photoId);
+        const onPhoto = annotations.filter((a) => a.photoId === link.photoId).map((a) => a.id).sort();
+        return figure && figure.shown.join() === onPhoto.join() && figure.highlighted.join() === [...link.annotationIds].sort().join();
+      }),
+    JSON.stringify(evidenceFigures.map((e) => ({ shown: e.shown.length, highlighted: e.highlighted.length }))),
+  );
+  const alignment = await evaluate(reportAlignment);
+  record("Report: annotations line up with the report images (within 1.5 px)", alignment.count > 0 && alignment.worst <= 1.5, `${alignment.count} shapes, worst ${alignment.worst?.toFixed?.(3)}px`);
+
+  // 3. Print layout: application chrome and toolbar hidden, report kept.
+  await send("Emulation.setEmulatedMedia", { media: "print" });
+  await delay(200);
+  const printView = await evaluate(`({
+    toolbar: document.querySelector('[data-testid="report-toolbar"]')?.checkVisibility() ?? false,
+    aside: [...document.querySelectorAll("aside")].some((e) => e.checkVisibility()),
+    report: ${REPORT}?.checkVisibility() ?? false,
+    page: getComputedStyle(${REPORT}).page,
+  })`);
+  record(
+    "Print: navigation and toolbar are hidden, the report is shown on 'report-finalised' pages",
+    !printView.toolbar && !printView.aside && printView.report && printView.page === "report-finalised",
+    JSON.stringify(printView),
+  );
+  const alignedInPrint = await evaluate(reportAlignment);
+  record("Print: annotations stay aligned in the print layout (within 1.5 px)", alignedInPrint.count > 0 && alignedInPrint.worst <= 1.5, `worst ${alignedInPrint.worst?.toFixed?.(3)}px`);
+  await screenshot("29-report-print-media");
+  await send("Emulation.setEmulatedMedia", { media: "" });
+
+  // 4. A real PDF from the print stylesheet.
+  const pdf = await printPdf("report-finalised");
+  record("Print: produces a real multi-page A4 PDF", pdf.isPdf && pdf.pages >= 2 && isA4(pdf), JSON.stringify(pdf));
+
+  // 5. Print button (window.print is replaced so the dialog never opens; calls are counted).
+  await evaluate(`window.__printCalls = 0; window.print = () => { window.__printCalls += 1; }; true`);
+  await realClick(PRINT_BUTTON);
+  await waitFor(`window.__printCalls === 1`, "print called");
+  record("Print: the Print button opens printing when the data is unchanged", true);
+
+  // 6. Export data (JSON): captured from the download Blob and the downloaded file.
+  for (const name of readdirSync(outDir)) if (/^towerguard-.*\.json$/.test(name)) rmSync(join(outDir, name));
+  await send("Page.setDownloadBehavior", { behavior: "allow", downloadPath: outDir });
+  await evaluate(`window.__exports = []; (() => { const original = URL.createObjectURL; URL.createObjectURL = (b) => { if (b instanceof Blob && b.type === "application/json") window.__exports.push(b); return original.call(URL, b); }; })(); true`);
+  await realClick(el('[data-testid="export-json"]'));
+  await waitFor(`${el('[data-testid="export-status"]')}?.dataset.exportStatus === "done" && window.__exports.length === 1`, "export done", 60000);
+  const exportedText = await evaluate(`window.__exports[0].text()`);
+  const exported = JSON.parse(exportedText);
+  const m = exported.manifest;
+  record(
+    "Export: manifest has format, version, timestamp, inspection ID and the report fingerprint",
+    m.format === "towerguard-inspection-export" && m.formatVersion === 1 && /^\d{4}-\d{2}-\d{2}T/.test(m.exportedAt) &&
+      m.inspectionId === inspectionId && m.inspectionStatus === "finalised" && m.contentFingerprint.sha256 === fingerprint,
+    JSON.stringify({ ...m, notes: undefined }),
+  );
+  const ids = (list) => list.map((r) => r.id).sort().join();
+  /** JSON with keys sorted at every level (the export writes keys in canonical order). */
+  const sortedJson = (value) => JSON.stringify(value, (k, v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v));
+  const inspectionBefore = (await readAll("inspections")).find((i) => i.id === inspectionId);
+  record(
+    "Export: every record is included with its permanent ID and relationships",
+    Object.keys(exported).join() === "manifest,inspection,photos,annotations,findings" &&
+      exported.inspection.id === inspectionId && exported.inspection.status === "finalised" && Boolean(exported.inspection.finalisation) &&
+      ids(exported.photos) === ids(photos) && ids(exported.annotations) === ids(annotations) && ids(exported.findings) === ids(findings) &&
+      exported.findings.every((f) => sortedJson(f) === sortedJson(findings.find((x) => x.id === f.id))) &&
+      exported.annotations.every((a) => sortedJson(a) === sortedJson(annotations.find((x) => x.id === a.id))) &&
+      sortedJson(exported.inspection) === sortedJson(inspectionBefore),
+  );
+  const originalsOk = exported.photos.length === photos.length && exported.photos.every((p) => {
+    const bytes = Buffer.from(p.original.data, "base64");
+    return bytes.length === p.sizeBytes && createHash("sha256").update(bytes).digest("hex") === p.sha256 &&
+      p.sha256 === photos.find((x) => x.id === p.id).sha256;
+  });
+  record("Export: original photographs decode to bytes matching their SHA-256 and size", originalsOk);
+  record(
+    "Export: engineering severity and manual provenance are preserved",
+    exported.findings.every((f) => f.engineeringSeverity === "not_assessed" && f.provenance.source === "manual"),
+  );
+  let downloaded = null;
+  const deadline = Date.now() + 15000;
+  while (!downloaded && Date.now() < deadline) {
+    downloaded = readdirSync(outDir).find((n) => /^towerguard-.*\.json$/.test(n)) ?? null;
+    if (!downloaded) await delay(200);
+  }
+  let fileMatches = false;
+  if (downloaded) {
+    await delay(500);
+    fileMatches = readFileSync(join(outDir, downloaded), "utf8") === exportedText;
+  }
+  record("Export: the downloaded file is the exported JSON, with a safe file name", fileMatches && /^towerguard-[A-Za-z0-9._-]+\.json$/.test(downloaded ?? ""), downloaded ?? "no file");
+  await screenshot("30-export-done");
+
+  // 7. Viewing, printing and exporting changed nothing.
+  await realClick(el('[data-testid="report-refresh"]'));
+  await waitFor(reportReady, "refreshed report");
+  record("Report: refreshing unchanged data gives the same fingerprint", (await reportFingerprint()) === fingerprint);
+  record("Report: viewing, refreshing, printing and exporting do not modify IndexedDB", (await evaluate(dumpDatabase)) === before);
+
+  // 8. Change detection (SIMULATED: another tab adds an annotation while the report is open).
+  const evidencePhotoId = findings.flatMap((f) => f.evidence)[0].photoId;
+  const extra = { ...annotations[0], id: "e2e-extra-annotation", photoId: evidencePhotoId, label: "other", createdAt: "2099-01-01T00:00:00.000Z", updatedAt: "2099-01-01T00:00:00.000Z" };
+  await putRecord("annotations", extra);
+  await realClick(PRINT_BUTTON);
+  await waitFor(`!!${el('[data-testid="report-changed"]')}`, "changed warning");
+  record("Print: refused with a refresh prompt when the data changed after the report was generated", await evaluate(`window.__printCalls === 1`));
+  await screenshot("31-report-changed");
+  await realClick(elByText('[data-testid="report-changed"] button', "Refresh report"));
+  await waitFor(`${reportReady} && !${el('[data-testid="report-changed"]')}`, "refreshed after change");
+  const changedFingerprint = await reportFingerprint();
+  await evaluate(`window.__printCalls = 0; window.print = () => { window.__printCalls += 1; }; true`);
+  await realClick(PRINT_BUTTON);
+  await waitFor(`window.__printCalls === 1`, "print after refresh");
+  record("Print: after refreshing, the report has a new fingerprint and prints", /^[0-9a-f]{64}$/.test(changedFingerprint) && changedFingerprint !== fingerprint);
+  record(
+    "Report: an annotation not linked to the finding is drawn dimmed in its evidence figure",
+    await evaluate(`${visibleAll('[data-testid="report-evidence"] [data-annotation-id="e2e-extra-annotation"]')}.length > 0 &&
+      ${visibleAll('[data-testid="report-evidence"] [data-annotation-id="e2e-extra-annotation"]')}.every((g) => g.dataset.dimmed === "true")`),
+  );
+  await deleteRecord("annotations", extra.id);
+  await realClick(el('[data-testid="report-refresh"]'));
+  await waitFor(reportReady, "refreshed after restore");
+  record("Report: restoring the original data restores the original fingerprint", (await reportFingerprint()) === fingerprint);
+
+  // 9. Damaged and broken records are shown, and the export is refused (SIMULATED damage, then removed).
+  const exportsBefore = await evaluate(`window.__exports.length`);
+  await putRecord("annotations", { id: "e2e-damaged-annotation", inspectionId, photoId: photos[0].id, shape: { kind: "rect" } });
+  await putRecord("annotations", { ...annotations[0], id: "e2e-orphan-annotation", photoId: "e2e-deleted-photo" });
+  await realClick(el('[data-testid="report-refresh"]'));
+  await waitFor(`${reportReady} && !!${el('[data-testid="report-issues"]')}`, "report issues");
+  const issueKinds = await evaluate(`${visibleAll('[data-testid="report-issues"] [data-issue-kind]')}.map((e) => e.dataset.issueKind)`);
+  record(
+    "Report: damaged and orphaned annotations are listed as data problems, not hidden",
+    issueKinds.includes("damaged_annotation") && issueKinds.includes("orphan_annotation") && (await evaluate(`${visibleAll('[data-count="issues"] dd')}[0].textContent === "2"`)),
+    issueKinds.join(),
+  );
+  await realClick(el('[data-testid="export-json"]'));
+  await waitFor(`${el('[data-testid="export-status"]')}?.dataset.exportStatus === "refused"`, "export refused");
+  record(
+    "Export: refused with the problems listed when records are damaged; no file is created",
+    (await evaluate(`${visibleAll('[data-testid="export-problems"] li')}.length`)) === 2 && (await evaluate(`window.__exports.length`)) === exportsBefore,
+  );
+  await screenshot("32-report-issues-export-refused");
+  await deleteRecord("annotations", "e2e-damaged-annotation");
+  await deleteRecord("annotations", "e2e-orphan-annotation");
+  record("Report: test damage removed; the database matches its original state", (await evaluate(dumpDatabase)) === before);
+
+  // 10. Draft and in-review reports are marked NOT FINAL on screen and on every printed page.
+  for (const [status, title] of [["draft", "DRAFT — NOT FINAL"], ["in_review", "IN REVIEW — NOT FINAL"]]) {
+    const id = `e2e-report-${status}`;
+    const pageName = `report-${status.replace("_", "-")}`;
+    await putRecord("inspections", {
+      id, siteId: "TWR-REPORT", siteName: `Report check (${status})`, structureType: "monopole", inspectorName: "Field Inspector",
+      inspectionDate: "2026-11-02", status, createdAt: "2026-11-02T09:00:00.000Z", updatedAt: "2026-11-02T09:00:00.000Z",
+    });
+    await navigate(`/inspections/${id}/report`);
+    await waitFor(reportReady, `${status} report`);
+    const shown = await evaluate(`({ final: ${banner}.dataset.final, text: ${banner}.innerText })`);
+    await send("Emulation.setEmulatedMedia", { media: "print" });
+    const page = await evaluate(`getComputedStyle(${REPORT}).page`);
+    await send("Emulation.setEmulatedMedia", { media: "" });
+    const statusPdf = await printPdf(pageName);
+    record(
+      `Report: a ${status.replace("_", "-")} report is marked '${title}' and prints as A4 on '${pageName}' pages`,
+      shown.final === "false" && shown.text.includes(title) && page === pageName && statusPdf.isPdf && isA4(statusPdf),
+      `${JSON.stringify(shown)} page=${page} ${JSON.stringify(statusPdf)}`,
+    );
+    if (status === "draft") await screenshot("33-report-draft");
+    await deleteRecord("inspections", id);
+  }
+
+  // 11. 390 px.
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await navigate(reportPath);
+  await waitFor(reportReady, "mobile report");
+  await delay(300);
+  const overflow = await evaluate(`document.documentElement.scrollWidth > window.innerWidth`);
+  await screenshot("34-report-mobile");
+  await send("Emulation.clearDeviceMetricsOverride");
+  record("Report: no horizontal overflow at 390px", !overflow);
+}
+
 try {
   await send("Page.enable");
   await send("Runtime.enable");
@@ -1308,7 +1629,9 @@ try {
   await damagedRecords();
   await photoEvidence();
   await annotationWorkspace();
-  await reviewAndFinalisation(await findingsWorkflow());
+  const findingsContext = await findingsWorkflow();
+  await reviewAndFinalisation(findingsContext);
+  await reportsAndExport(findingsContext.inspectionId);
 } catch (error) {
   record("Browser run aborted", false, error.message);
   try {

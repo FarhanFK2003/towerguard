@@ -2,7 +2,7 @@
 
 import { useCallback, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { ClipboardList, HardDrive, Info, RotateCw, SearchX } from "lucide-react";
+import { ClipboardList, FileText, HardDrive, Info, RotateCw, SearchX } from "lucide-react";
 import { StorageStatus } from "@/components/dashboard/StorageStatus";
 import { FindingsSummaryCard } from "@/components/findings/FindingsSummaryCard";
 import { BackLink } from "@/components/layout/BackLink";
@@ -98,7 +98,15 @@ function InspectionDetails({ inspection, onInspectionChanged }: { inspection: In
             </span>
           </span>
         }
-        actions={<DeleteInspectionButton inspection={inspection} />}
+        actions={
+          <>
+            <Link href={`/inspections/${inspection.id}/report`} className={buttonClasses({ variant: "secondary" })} data-testid="view-report">
+              <FileText aria-hidden="true" />
+              View report
+            </Link>
+            <DeleteInspectionButton inspection={inspection} />
+          </>
+        }
       />
 
       <div className="grid gap-6 lg:grid-cols-3">

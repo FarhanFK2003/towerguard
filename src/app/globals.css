@@ -20,3 +20,123 @@ html {
 body {
   @apply bg-slate-100 font-sans text-slate-900;
 }
+
+/* ---- Inspection report ------------------------------------------------- */
+
+/* Maximum height of a report figure; its width follows the aspect ratio. */
+.report-figure-evidence {
+  --report-figure-max-h: 24rem;
+}
+.report-figure-register {
+  --report-figure-max-h: 32rem;
+}
+
+/*
+ * Fixed A4 paper with 14 mm margins. Page numbers and, on report pages, the
+ * lifecycle status are printed in the page margins of every page (shown when
+ * the browser's own headers and footers are turned off).
+ */
+@page {
+  size: A4;
+  margin: 14mm;
+
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font: 8pt ui-sans-serif, system-ui, sans-serif;
+    color: #475569;
+  }
+}
+
+@page report-draft {
+  @top-center {
+    content: "DRAFT — NOT FINAL";
+    font: 700 9pt ui-sans-serif, system-ui, sans-serif;
+    color: #b91c1c;
+  }
+  @bottom-left {
+    content: "TowerGuard AI · Visual inspection report · Not final";
+    font: 8pt ui-sans-serif, system-ui, sans-serif;
+    color: #475569;
+  }
+}
+
+@page report-in-review {
+  @top-center {
+    content: "IN REVIEW — NOT FINAL";
+    font: 700 9pt ui-sans-serif, system-ui, sans-serif;
+    color: #b91c1c;
+  }
+  @bottom-left {
+    content: "TowerGuard AI · Visual inspection report · Not final";
+    font: 8pt ui-sans-serif, system-ui, sans-serif;
+    color: #475569;
+  }
+}
+
+@page report-finalised {
+  @top-center {
+    content: "Finalised documentation — not an engineering assessment";
+    font: 600 8pt ui-sans-serif, system-ui, sans-serif;
+    color: #065f46;
+  }
+  @bottom-left {
+    content: "TowerGuard AI · Visual inspection report";
+    font: 8pt ui-sans-serif, system-ui, sans-serif;
+    color: #475569;
+  }
+}
+
+@media print {
+  html {
+    font-size: 11px;
+  }
+
+  body {
+    background: #ffffff;
+  }
+
+  .report-document {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .report-draft {
+    page: report-draft;
+  }
+  .report-in-review {
+    page: report-in-review;
+  }
+  .report-finalised {
+    page: report-finalised;
+  }
+
+  .report-figure-evidence {
+    --report-figure-max-h: 95mm;
+  }
+  .report-figure-register {
+    --report-figure-max-h: 150mm;
+  }
+
+  .report-avoid-break,
+  .report-figure,
+  [data-testid="report-finding"] > div:first-child {
+    break-inside: avoid;
+  }
+
+  .report-page-break {
+    break-before: page;
+  }
+
+  .report-document h2,
+  .report-document h3 {
+    break-after: avoid;
+  }
+
+  .report-document thead {
+    display: table-header-group;
+  }
+
+  .report-document tr {
+    break-inside: avoid;
+  }
+}

@@ -7,6 +7,7 @@ import {
   CalendarDays,
   ChevronRight,
   Clock,
+  FileText,
   ListChecks,
   MapPin,
   Paperclip,
@@ -143,6 +144,10 @@ export function FindingsList({ inspectionId }: { inspectionId: ID }) {
         description="Inspection observations documented by the inspector, linked to photographic evidence."
         actions={
           <>
+            <Link href={`/inspections/${inspectionId}/report`} className={buttonClasses({ variant: "secondary" })} data-testid="view-report">
+              <FileText aria-hidden="true" />
+              View report
+            </Link>
             {next ? (
               <Link href={`${base}/${next.id}`} className={buttonClasses({ variant: "secondary" })} data-testid="next-needing-review">
                 Next finding needing review

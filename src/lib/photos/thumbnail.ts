@@ -22,7 +22,7 @@ export interface DecodedImage {
   thumbnail: Blob;
 }
 
-async function encode(bitmap: ImageBitmap, size: { width: number; height: number }): Promise<Blob> {
+async function encode(bitmap: ImageBitmap, size: { width: number; height: number }, quality: number): Promise<Blob> {
   const draw = (ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D) => {
     // JPEG has no alpha: paint transparent PNG/WebP areas white rather than black.
     ctx.fillStyle = "#ffffff";
@@ -36,7 +36,7 @@ async function encode(bitmap: ImageBitmap, size: { width: number; height: number
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new PhotoError("unavailable", "This browser cannot create image thumbnails.");
     draw(ctx);
-    return canvas.convertToBlob({ type: THUMBNAIL_TYPE, quality: THUMBNAIL_QUALITY });
+    return canvas.convertToBlob({ type: THUMBNAIL_TYPE, quality });
   }
 
   const canvas = document.createElement("canvas");
@@ -49,16 +49,21 @@ async function encode(bitmap: ImageBitmap, size: { width: number; height: number
     canvas.toBlob(
       (blob) => (blob ? resolve(blob) : reject(new PhotoError("unavailable", "Thumbnail encoding failed."))),
       THUMBNAIL_TYPE,
-      THUMBNAIL_QUALITY,
+      quality,
     );
   });
 }
 
 /**
  * Decodes the image once to measure it and render a thumbnail, then releases
- * the decoded pixels. Browser-only (uses `createImageBitmap`).
+ * the decoded pixels. Also used for report images at a larger size and higher
+ * quality. Browser-only (uses `createImageBitmap`).
  */
-export async function decodeAndThumbnail(image: Blob, maxEdge = THUMBNAIL_MAX_EDGE): Promise<DecodedImage> {
+export async function decodeAndThumbnail(
+  image: Blob,
+  maxEdge = THUMBNAIL_MAX_EDGE,
+  quality = THUMBNAIL_QUALITY,
+): Promise<DecodedImage> {
   if (typeof createImageBitmap !== "function") {
     throw new PhotoError("unavailable", "This browser cannot decode images.");
   }
@@ -74,7 +79,7 @@ export async function decodeAndThumbnail(image: Blob, maxEdge = THUMBNAIL_MAX_ED
   }
   try {
     const { width, height } = bitmap;
-    const thumbnail = await encode(bitmap, fitWithin(width, height, maxEdge));
+    const thumbnail = await encode(bitmap, fitWithin(width, height, maxEdge), quality);
     return { width, height, thumbnail };
   } finally {
     bitmap.close();
