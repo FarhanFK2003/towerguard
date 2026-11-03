@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { CircleAlert, CircleCheck, LoaderCircle, Lock, MapPin, Maximize, MousePointer2, Square, ZoomIn, ZoomOut } from "lucide-react";
+import { CircleAlert, CircleCheck, LoaderCircle, Lock, MapPin, Maximize, MousePointer2, VectorSquare, ZoomIn, ZoomOut } from "lucide-react";
 import { MAX_ZOOM, MIN_ZOOM } from "@/lib/annotations/viewport";
 import { cn } from "@/lib/cn";
 import type { SaveState } from "./useAnnotations";
@@ -8,7 +8,7 @@ export type Tool = "select" | "rect" | "point";
 
 const TOOLS: readonly { tool: Tool; label: string; shortcut: string; icon: ReactNode }[] = [
   { tool: "select", label: "Select", shortcut: "V", icon: <MousePointer2 /> },
-  { tool: "rect", label: "Rectangle", shortcut: "R", icon: <Square /> },
+  { tool: "rect", label: "Rectangle", shortcut: "R", icon: <VectorSquare /> },
   { tool: "point", label: "Point", shortcut: "P", icon: <MapPin /> },
 ];
 

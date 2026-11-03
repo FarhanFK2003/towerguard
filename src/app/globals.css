@@ -54,7 +54,7 @@ body {
     color: #b91c1c;
   }
   @bottom-left {
-    content: "TowerGuard AI · Visual inspection report · Not final";
+    content: "TowerGuard · Visual inspection report · Not final";
     font: 8pt ui-sans-serif, system-ui, sans-serif;
     color: #475569;
   }
@@ -67,7 +67,7 @@ body {
     color: #b91c1c;
   }
   @bottom-left {
-    content: "TowerGuard AI · Visual inspection report · Not final";
+    content: "TowerGuard · Visual inspection report · Not final";
     font: 8pt ui-sans-serif, system-ui, sans-serif;
     color: #475569;
   }
@@ -80,7 +80,7 @@ body {
     color: #065f46;
   }
   @bottom-left {
-    content: "TowerGuard AI · Visual inspection report";
+    content: "TowerGuard · Visual inspection report";
     font: 8pt ui-sans-serif, system-ui, sans-serif;
     color: #475569;
   }

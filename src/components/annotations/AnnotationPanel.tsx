@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ListPlus, MapPin, Square, SquareDashedMousePointer, Trash2 } from "lucide-react";
+import { ListPlus, MapPin, SquareDashedMousePointer, Trash2, VectorSquare } from "lucide-react";
 import { Button, buttonClasses } from "@/components/ui/Button";
 import { Callout } from "@/components/ui/Callout";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
@@ -96,7 +96,7 @@ export function AnnotationPanel({
                       {index + 1}
                     </span>
                     <span className="text-slate-500 [&_svg]:size-4" title={ANNOTATION_SHAPE_LABELS[annotation.shape.kind]}>
-                      {annotation.shape.kind === "rect" ? <Square aria-hidden="true" /> : <MapPin aria-hidden="true" />}
+                      {annotation.shape.kind === "rect" ? <VectorSquare aria-hidden="true" /> : <MapPin aria-hidden="true" />}
                       <span className="sr-only">{ANNOTATION_SHAPE_LABELS[annotation.shape.kind]}</span>
                     </span>
                     <span className={cn("min-w-0 flex-1 truncate", annotation.label ? "text-slate-900" : "text-slate-500 italic")}>

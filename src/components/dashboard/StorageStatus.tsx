@@ -84,7 +84,7 @@ export function StorageStatus({ refreshKey = 0 }: { refreshKey?: number }) {
         {formatPercent(fraction)} of quota used.{" "}
         {state.persisted === true
           ? "Persistent storage is granted."
-          : "Persistent storage is not yet granted, so the browser may clear data under storage pressure. Export inspections as backups."}
+          : "Persistent storage is not yet granted, so the browser may clear data under storage pressure. Export inspections as JSON to keep a copy. Importing exported inspections is not currently supported."}
       </p>
     </div>
   );

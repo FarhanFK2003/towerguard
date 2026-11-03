@@ -112,6 +112,7 @@ export function ReportView({ inspectionId }: { inspectionId: ID }) {
         <BackLink href={`/inspections/${inspectionId}`}>Inspection</BackLink>
         <PageHeader
           eyebrow={`${model.inspection.siteName} (${model.inspection.siteId})`}
+          as="h2"
           title="Inspection report"
           description="A read-only, printable report generated from the data stored in this browser. Viewing or printing it changes nothing."
           actions={

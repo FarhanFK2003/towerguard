@@ -125,12 +125,18 @@ describe("lifecycleBanner", () => {
 });
 
 describe("REPORT_DISCLAIMER", () => {
-  it("covers all five required statements", () => {
+  it("covers all required statements", () => {
     const text = REPORT_DISCLAIMER.join(" ");
     expect(text).toMatch(/recorded manually by the inspector/);
-    expect(text).toMatch(/inspector-entered information/);
-    expect(text).toMatch(/not assessed/);
-    expect(text).toMatch(/does not constitute structural certification/);
+    expect(text).toMatch(/does not perform automated image analysis/);
+    expect(text).toMatch(/not an engineering severity rating/);
+    expect(text).toMatch(/Engineering severity is not assessed/);
+    expect(text).toMatch(/not a structural engineering assessment or certification/);
     expect(text).toMatch(/does not establish that the inspected structure is safe/);
+    expect(text).toMatch(/qualified engineer/);
+  });
+
+  it("does not describe an engineering assessment workflow the app cannot record", () => {
+    expect(REPORT_DISCLAIMER.join(" ")).not.toMatch(/external engineering assessment/);
   });
 });

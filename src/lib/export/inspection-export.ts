@@ -1,5 +1,6 @@
 import type { ID, PhotoRecord } from "@/lib/domain/types";
 import { sha256Hex } from "@/lib/photos/hash";
+import { PRODUCT_NAME } from "@/lib/product";
 import { canonicalJson } from "@/lib/report/canonical";
 import { FINGERPRINT_SCHEME, computeReportFingerprint } from "@/lib/report/fingerprint";
 import { buildReportModel } from "@/lib/report/model";
@@ -88,7 +89,7 @@ export async function buildInspectionExport(snapshot: InspectionSnapshot, option
     format: EXPORT_FORMAT,
     formatVersion: EXPORT_FORMAT_VERSION,
     exportedAt: options.exportedAt,
-    application: "TowerGuard AI",
+    application: PRODUCT_NAME,
     inspectionId: inspection.id,
     inspectionStatus: inspection.status,
     contentFingerprint: { scheme: FINGERPRINT_SCHEME, sha256: await computeReportFingerprint(snapshot) },

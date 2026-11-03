@@ -11,11 +11,11 @@ import type { InspectionSnapshot } from "@/lib/storage/snapshot";
  */
 
 export const REPORT_DISCLAIMER: readonly string[] = [
-  "This report documents visual inspection observations recorded manually by the inspector.",
+  "This report documents visual inspection observations recorded manually by the inspector. TowerGuard does not perform automated image analysis.",
   "Findings, categories and priorities are inspector-entered information. Inspector priority is a follow-up priority, not an engineering severity rating.",
-  "Engineering severity is recorded as “not assessed” for every finding unless an external engineering assessment is referenced; TowerGuard AI does not perform engineering assessments.",
-  "This report does not constitute structural certification, engineering approval or an engineering safety assessment.",
-  "This report does not establish that the inspected structure is safe.",
+  "Engineering severity is not assessed: every finding records it as “Not assessed”.",
+  "This report is not a structural engineering assessment or certification, and it does not establish that the inspected structure is safe.",
+  "Structural conclusions require the judgement of a qualified engineer.",
 ];
 
 export interface LifecycleBanner {

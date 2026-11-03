@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { Badge } from "@/components/ui/Badge";
 import { cn } from "@/lib/cn";
 import { isActivePath } from "@/lib/navigation";
 import { NAV_ITEMS } from "./nav-items";
@@ -17,22 +16,7 @@ export interface NavListProps {
 export function NavList({ pathname, onNavigate }: NavListProps) {
   return (
     <ul className="space-y-1">
-      {NAV_ITEMS.map(({ label, href, icon: Icon, available }) => {
-        if (!available) {
-          return (
-            <li key={href}>
-              <span
-                className={cn(ITEM, "cursor-not-allowed text-slate-500")}
-                aria-disabled="true"
-              >
-                <Icon aria-hidden="true" />
-                <span className="flex-1">{label}</span>
-                <Badge tone="accent">Soon</Badge>
-              </span>
-            </li>
-          );
-        }
-
+      {NAV_ITEMS.map(({ label, href, icon: Icon }) => {
         const active = pathname !== undefined && isActivePath(pathname, href);
         return (
           <li key={href}>

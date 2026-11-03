@@ -94,7 +94,8 @@ export function InspectionForm() {
       setErrors({});
       setSubmitted(false);
       setSaving(false);
-      router.push(`/inspections/${record.id}`);
+      // Replace, so Back returns to where the user came from rather than an empty form.
+      router.replace(`/inspections/${record.id}`);
     } catch (error) {
       setSaveError(describeStorageError(error));
       setSaving(false);
@@ -214,7 +215,7 @@ export function InspectionForm() {
                 type="button"
                 disabled={saving}
                 onClick={() => update("inspectionDate", toLocalIsoDate(new Date()))}
-                className="rounded text-xs font-medium text-amber-700 hover:text-amber-900 focus-visible:outline-2 focus-visible:outline-amber-500 disabled:opacity-50"
+                className="-my-1 inline-flex min-h-6 items-center rounded px-1 text-xs font-medium text-amber-700 hover:text-amber-900 focus-visible:outline-2 focus-visible:outline-amber-500 disabled:opacity-50"
               >
                 Use today
               </button>

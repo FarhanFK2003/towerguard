@@ -46,7 +46,8 @@ export function DeleteInspectionButton({ inspection }: { inspection: Inspection 
           <>
             {finalised ? (
               <p className="mb-2 rounded-md border border-red-200 bg-red-50 p-2 font-medium text-red-800">
-                This inspection is finalised. Deleting it permanently removes its completed documentation record.
+                This inspection is finalised. Deleting it permanently removes the stored inspection record and all of
+                its evidence: photographs, annotations, findings and review decisions.
               </p>
             ) : null}
             <p>

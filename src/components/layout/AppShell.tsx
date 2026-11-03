@@ -8,6 +8,12 @@ import { WorkspaceNote } from "./WorkspaceNote";
 export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen">
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-md focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-slate-900 focus:shadow-lg focus:outline-2 focus:outline-amber-500 print:hidden"
+      >
+        Skip to main content
+      </a>
       <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col bg-slate-950 lg:flex print:hidden">
         <div className="border-b border-white/10 px-5 py-5">
           <Brand />
@@ -27,7 +33,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <MobileNav />
-        <main id="main" className="flex-1">
+        <main id="main" tabIndex={-1} className="flex-1 focus:outline-none">
           {children}
         </main>
       </div>

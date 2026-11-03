@@ -111,9 +111,7 @@ export function FindingReviewPanel({
               </div>
             ) : null}
           </dl>
-        ) : (
-          <p className="text-sm text-slate-500">Not reviewed yet.</p>
-        )}
+        ) : null}
 
         {readOnly ? (
           <p className="text-sm text-slate-500">Review actions are unavailable while the inspection is finalised.</p>

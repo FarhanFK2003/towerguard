@@ -44,7 +44,7 @@ Each record is serialised canonically: object keys are sorted alphabetically at 
 | `format` | Always `"towerguard-inspection-export"`. |
 | `formatVersion` | `1`. Incremented for any incompatible change. |
 | `exportedAt` | ISO 8601 UTC timestamp of the export. |
-| `application` | `"TowerGuard AI"`. |
+| `application` | Name of the producing application: `"TowerGuard"`. Informational only; exports created before the product was renamed contain `"TowerGuard AI"`. |
 | `inspectionId` | Permanent ID of the exported inspection. |
 | `inspectionStatus` | `draft`, `in_review` or `finalised` at the time of export. |
 | `contentFingerprint` | `{ scheme, sha256 }`. This is the same report data fingerprint shown on the printed report for the same data (scheme `towerguard-report-fingerprint/1`), so an export can be matched to a report. |

@@ -81,7 +81,7 @@ export function InspectionReport({
       <header className="space-y-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">TowerGuard AI · Visual inspection documentation</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">TowerGuard · Visual inspection documentation</p>
             <h1 className="mt-1 text-2xl font-semibold tracking-tight">Visual inspection report</h1>
             <p className="mt-1 text-base text-slate-700">
               {inspection.siteName} <span className="font-mono text-sm">({inspection.siteId})</span>

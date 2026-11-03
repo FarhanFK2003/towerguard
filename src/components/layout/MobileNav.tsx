@@ -24,7 +24,7 @@ export function MobileNav() {
   return (
     <div className="lg:hidden print:hidden">
       <div className="sticky top-0 z-30 flex h-14 items-center justify-between bg-slate-950 px-4">
-        <Brand />
+        <Brand compact />
         <button
           type="button"
           onClick={() => setOpen(true)}

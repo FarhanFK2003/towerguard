@@ -193,6 +193,43 @@ async function inspectionLifecycle() {
   record("Dashboard loads with empty state (fresh browser profile)", true);
   await screenshot("01-dashboard-empty");
 
+  // Branding and AI positioning.
+  const branding = await evaluate(`({ title: document.title, text: document.body.innerText, ai: document.querySelector('[data-testid="ai-status"]')?.textContent })`);
+  record(
+    "Branding: the product is 'TowerGuard' (no 'TowerGuard AI') and the dashboard states AI inference is not implemented",
+    branding.title === "TowerGuard" && !branding.text.includes("TowerGuard AI") &&
+      branding.ai?.includes("Automated AI inference is not currently implemented.") &&
+      branding.text.includes("TowerGuard does not perform automated image analysis."),
+    branding.title,
+  );
+  record(
+    "Branding: the storage note does not suggest exports can be restored",
+    branding.text.includes("Importing exported inspections is not currently supported.") && !branding.text.includes("as backups"),
+  );
+
+  // Skip link: the first Tab stop, and it moves focus to the main content.
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+  const skip = await evaluate(`({ text: document.activeElement.textContent.trim(), visible: document.activeElement.getBoundingClientRect().width > 1 })`);
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+  await delay(150);
+  record(
+    "Accessibility: 'Skip to main content' is the first Tab stop, becomes visible, and moves focus to the main content",
+    skip.text === "Skip to main content" && skip.visible && (await evaluate(`document.activeElement.id === "main"`)),
+    JSON.stringify(skip),
+  );
+
+  // 404 page.
+  await navigate("/no-such-page");
+  await waitFor(bodyHas("Page not found"), "404 page");
+  record(
+    "Not found: the page has an h1, no 'not available yet' wording, and a link back to the dashboard",
+    (await evaluate(`[...document.querySelectorAll("h1")].map((h) => h.textContent.trim()).join("|") === "Page not found"`)) &&
+      !(await evaluate(bodyHas("not available yet"))) &&
+      (await evaluate(`[...document.querySelectorAll("main a")].some((a) => a.getAttribute("href") === "/" && a.textContent.includes("Back to dashboard"))`)),
+  );
+
   // Validation errors on empty submit.
   await navigate("/inspections/new");
   await waitFor(`!!document.querySelector("#inspection-siteId")`, "form");
@@ -1429,7 +1466,18 @@ async function reportsAndExport(inspectionId) {
   const disclaimer = await evaluate(`${el('[data-testid="report-disclaimer"]')}?.innerText ?? ""`);
   record(
     "Report: includes the scope-and-limitations disclaimer",
-    ["recorded manually by the inspector", "not an engineering severity rating", "does not constitute structural certification", "does not establish that the inspected structure is safe"].every((s) => disclaimer.includes(s)),
+    ["recorded manually by the inspector", "not an engineering severity rating", "not a structural engineering assessment or certification", "does not establish that the inspected structure is safe", "qualified engineer"].every((s) => disclaimer.includes(s)),
+  );
+  // textContent, not innerText: the eyebrow is styled `uppercase`, which innerText applies.
+  const reportHeadings = await evaluate(`({
+    h1: ${visibleAll("h1")}.map((h) => h.textContent.trim()).join("|"),
+    aiBranding: document.body.textContent.includes("TowerGuard AI"),
+    brand: ${REPORT}.textContent.includes("TowerGuard · Visual inspection documentation"),
+  })`);
+  record(
+    "Report: one primary h1 (the report document) and no 'TowerGuard AI' branding",
+    reportHeadings.h1 === "Visual inspection report" && !reportHeadings.aiBranding && reportHeadings.brand,
+    JSON.stringify(reportHeadings),
   );
   record("Report: no data problems are reported for intact data", !(await evaluate(`!!${el('[data-testid="report-issues"]')}`)));
   const evidenceFigures = await evaluate(`${visibleAll('[data-testid="report-evidence"]')}.map((e) => ({
@@ -1493,7 +1541,8 @@ async function reportsAndExport(inspectionId) {
   record(
     "Export: manifest has format, version, timestamp, inspection ID and the report fingerprint",
     m.format === "towerguard-inspection-export" && m.formatVersion === 1 && /^\d{4}-\d{2}-\d{2}T/.test(m.exportedAt) &&
-      m.inspectionId === inspectionId && m.inspectionStatus === "finalised" && m.contentFingerprint.sha256 === fingerprint,
+      m.inspectionId === inspectionId && m.inspectionStatus === "finalised" && m.contentFingerprint.sha256 === fingerprint &&
+      m.application === "TowerGuard",
     JSON.stringify({ ...m, notes: undefined }),
   );
   const ids = (list) => list.map((r) => r.id).sort().join();
@@ -1603,7 +1652,7 @@ async function reportsAndExport(inspectionId) {
     await send("Emulation.setEmulatedMedia", { media: "" });
     const statusPdf = await printPdf(pageName);
     record(
-      `Report: a ${status.replace("_", "-")} report is marked '${title}' and prints as A4 on '${pageName}' pages`,
+      `Report: ${status === "draft" ? "a draft" : "an in-review"} report is marked '${title}' and prints as A4 on '${pageName}' pages`,
       shown.final === "false" && shown.text.includes(title) && page === pageName && statusPdf.isPdf && isA4(statusPdf),
       `${JSON.stringify(shown)} page=${page} ${JSON.stringify(statusPdf)}`,
     );

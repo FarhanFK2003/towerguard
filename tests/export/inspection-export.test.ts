@@ -78,6 +78,7 @@ describe("buildInspectionExport", () => {
       format: EXPORT_FORMAT,
       formatVersion: EXPORT_FORMAT_VERSION,
       exportedAt: EXPORTED_AT,
+      application: "TowerGuard",
       inspectionId: "insp-1",
       inspectionStatus: "finalised",
       counts: { photos: 2, annotations: 2, findings: 1 },

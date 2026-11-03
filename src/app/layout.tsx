@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/layout/AppShell";
+import { PRODUCT_NAME, PRODUCT_TAGLINE } from "@/lib/product";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "TowerGuard AI",
-    template: "%s · TowerGuard AI",
+    default: PRODUCT_NAME,
+    template: `%s · ${PRODUCT_NAME}`,
   },
-  description:
-    "Evidence-based visual inspection and damage documentation for telecom towers and steel structures.",
+  description: `${PRODUCT_TAGLINE}: evidence-linked visual inspection documentation for telecom towers and steel structures.`,
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

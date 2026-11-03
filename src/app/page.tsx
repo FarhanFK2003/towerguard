@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { buttonClasses } from "@/components/ui/Button";
 import { Callout } from "@/components/ui/Callout";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
+import { AI_STATUS_STATEMENT } from "@/lib/product";
 
 export default function DashboardPage() {
   return (
@@ -40,9 +41,11 @@ export default function DashboardPage() {
         aside={
           <>
             <Callout tone="warning" title="Scope of this tool">
-              TowerGuard AI supports visual documentation only. All observations are entered and
-              reviewed by the inspector; no automated image analysis is active. Reports do not
-              constitute a structural or engineering assessment.
+              <p data-testid="ai-status">{AI_STATUS_STATEMENT}</p>
+              <p className="mt-2">
+                TowerGuard does not perform automated image analysis. Reports are not a structural
+                engineering assessment or certification.
+              </p>
             </Callout>
 
             <Card>

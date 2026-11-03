@@ -97,7 +97,7 @@ export function FindingsSummaryCard({ inspectionId, readOnly = false }: { inspec
             );
           })()
         )}
-        <Link href={base} className="inline-block text-sm font-medium text-amber-700 hover:text-amber-900 hover:underline">
+        <Link href={base} className="inline-flex min-h-6 items-center rounded text-sm font-medium text-amber-700 hover:text-amber-900 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500">
           View all findings →
         </Link>
       </CardBody>
