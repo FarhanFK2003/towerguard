@@ -102,10 +102,10 @@ to create.
 ## Demo walkthrough (3–5 minutes)
 
 1. **Dashboard:** the workflow, the scope note and the local-only storage indicator.
-2. **Create an inspection:** choose **New inspection**, enter realistic site details, and use
-   **Use today** for the date.
-3. **Upload photographs:** drag in three or four photos. Each shows its dimensions, and the
-   photograph page shows its SHA-256 hash.
+2. **Create an inspection:** choose **New inspection**, enter the demonstration inspection details
+   from [docs/demo-checklist.md](docs/demo-checklist.md), and use **Use today** for the date.
+3. **Upload photographs:** drag in the three photos from `docs/demo-photos/` and add their
+   attribution captions. Each shows its dimensions, and the photograph page shows its SHA-256 hash.
 4. **Annotate:** open a photograph, draw two rectangles and a point (**R**, **P**), label them, and
    zoom to show the annotations stay aligned.
 5. **Create an evidence-linked finding:** select an annotation and choose **Create finding from
@@ -125,6 +125,20 @@ to create.
 
 Preparation steps, including photograph requirements, are in
 [docs/demo-checklist.md](docs/demo-checklist.md).
+
+## Demo photographs and credits
+
+Three third-party photographs of telecom towers are included in `docs/demo-photos/` for
+demonstration purposes. They are not verified TowerGuard inspection evidence, and any annotations or
+findings recorded on them in a demonstration are illustrative.
+
+- They are uploaded manually through the normal inspection workflow. The app does not bundle, serve
+  or load them automatically.
+- Photographers, sources, licences (CC BY-SA 4.0, Unsplash Licence and Pexels Licence) and SHA-256
+  hashes are listed in [docs/demo-photos/CREDITS.md](docs/demo-photos/CREDITS.md). The photographs
+  remain under their own licences and are not covered by the TowerGuard code licence.
+- [docs/demo-checklist.md](docs/demo-checklist.md) gives the demonstration procedure, including
+  the demonstration inspection details and the attribution captions to enter.
 
 ## Limitations
 
@@ -252,6 +266,7 @@ src/
 tests/                 Vitest unit tests
 e2e/                   browser checks and synthetic test images (not inspection photographs)
 docs/                  export format and demo checklist
+  demo-photos/         third-party demonstration photographs and their credits (not used by the app)
 ```
 
 ## Development note

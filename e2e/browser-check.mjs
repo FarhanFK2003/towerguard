@@ -1671,6 +1671,103 @@ async function reportsAndExport(inspectionId) {
   record("Report: no horizontal overflow at 390px", !overflow);
 }
 
+// ---- Demonstration photograph: EXIF orientation ----------------------------
+
+const DEMO_PHOTO = join(e2eDir, "..", "docs", "demo-photos", "demo-01-lattice-tower-nextelsys-wikimedia-cc-by-sa-4.0.jpg");
+
+/**
+ * The first demonstration photograph is stored sideways (3264 × 2448) with
+ * EXIF orientation 6, so it must be treated everywhere as a 2448 × 3264
+ * portrait. Uses a temporary draft inspection, deleted through the UI at the end.
+ */
+async function exifOrientedDemoPhoto() {
+  const inspectionId = "e2e-exif-demo";
+  const now = new Date().toISOString();
+  const ofInspection = async (store) => (await readAll(store)).filter((r) => r.inspectionId === inspectionId);
+  await putRecord("inspections", {
+    id: inspectionId, siteId: "E2E-EXIF", siteName: "EXIF orientation check (temporary)", structureType: "lattice",
+    inspectorName: "Test Inspector", inspectionDate: now.slice(0, 10), status: "draft", createdAt: now, updatedAt: now,
+  });
+
+  // 1. Upload the committed asset through the inspection page.
+  await navigate(`/inspections/${inspectionId}`);
+  await waitFor(`!!document.querySelector('input[type="file"]')`, "upload input");
+  await setInputFiles('input[type="file"]', [DEMO_PHOTO]);
+  await waitFor(`${withStore("photos", "readonly", `const r = store.getAll(); r.onsuccess = () => { result = r.result; };`)}.then((r) => r.some((p) => p.inspectionId === "${inspectionId}"))`, "demo photo stored");
+  const [photo] = await ofInspection("photos");
+  const stored = (await evaluate(readPhotoState)).images[photo.id];
+  const fileSha = sha256OfFile(DEMO_PHOTO);
+  record(
+    "Demo photo: the EXIF-rotated original is recorded as a 2448 × 3264 portrait",
+    photo.width === 2448 && photo.height === 3264,
+    `${photo.width} × ${photo.height}`,
+  );
+  record(
+    "Demo photo: the stored original is byte-identical to the committed file (SHA-256 and size)",
+    photo.sha256 === fileSha && stored.originalSha === fileSha && stored.originalSize === statSync(DEMO_PHOTO).size,
+  );
+
+  // 2. The workspace displays it upright, and a drawn rectangle stays aligned.
+  await navigate(`/inspections/${inspectionId}/photos/${photo.id}`);
+  await waitFor(`${STAGE_IMG}?.complete && ${STAGE_IMG}.naturalWidth > 0 && !!document.querySelector('[data-testid="annotation-overlay"]')`, "demo workspace");
+  await evaluate(`document.querySelector('[data-testid="annotation-viewport"]').scrollIntoView({ block: "center" })`);
+  await delay(200);
+  const shown = await evaluate(`(() => { const i = ${STAGE_IMG}; const r = i.getBoundingClientRect(); return { natural: [i.naturalWidth, i.naturalHeight], ratio: r.width / r.height }; })()`);
+  record(
+    "Demo photo: the annotation workspace shows it upright (2448 × 3264, portrait aspect)",
+    shown.natural[0] === 2448 && shown.natural[1] === 3264 && Math.abs(shown.ratio - 2448 / 3264) < 0.01,
+    JSON.stringify(shown),
+  );
+  await evaluate(clickByText("button", "Rectangle"));
+  await mouseDrag(await imagePoint(0.15, 0.2), await imagePoint(0.6, 0.45));
+  await waitFor(`${listCount} === 1 && ${saved}`, "demo rectangle saved");
+  const [annotation] = await ofInspection("annotations");
+  const s = annotation.shape;
+  const workspaceError = await evaluate(`(() => {
+    const img = ${STAGE_IMG}.getBoundingClientRect();
+    const b = document.querySelector('[data-annotation-id="${annotation.id}"] [data-shape]').getBoundingClientRect();
+    const s = ${JSON.stringify(s)};
+    return Math.max(...[b.left - (img.left + s.x * img.width), b.top - (img.top + s.y * img.height),
+      b.right - (img.left + (s.x + s.width) * img.width), b.bottom - (img.top + (s.y + s.height) * img.height)].map(Math.abs));
+  })()`);
+  record(
+    "Demo photo: a rectangle drawn on the upright image is stored at the drawn position and stays aligned",
+    s.kind === "rect" && near(s.x, 0.15) && near(s.y, 0.2) && near(s.width, 0.45) && near(s.height, 0.25) && workspaceError <= 1,
+    `${JSON.stringify(s)}, worst ${workspaceError.toFixed(2)}px`,
+  );
+
+  // 3. The report's print copy is portrait, within 1,600 px, with the annotation aligned on screen and in print layout.
+  await navigate(`/inspections/${inspectionId}/report`);
+  await waitFor(reportReady, "demo report");
+  const printCopy = await evaluate(`${visibleAll('[data-testid="report-figure-frame"] img')}.map((i) => [i.naturalWidth, i.naturalHeight])`);
+  const screenAlignment = await evaluate(reportAlignment);
+  await send("Emulation.setEmulatedMedia", { media: "print" });
+  await delay(200);
+  const printAlignment = await evaluate(reportAlignment);
+  await send("Emulation.setEmulatedMedia", { media: "" });
+  record(
+    "Demo photo: the report's print copy is a portrait image within 1,600 px",
+    printCopy.length > 0 && printCopy.every(([w, h]) => h === 1600 && w === 1200),
+    JSON.stringify(printCopy),
+  );
+  record(
+    "Demo photo: the annotation stays aligned in the report on screen and in print layout (within 1.5 px)",
+    screenAlignment.count > 0 && screenAlignment.worst <= 1.5 && printAlignment.count > 0 && printAlignment.worst <= 1.5,
+    `screen ${screenAlignment.worst.toFixed(3)}px, print ${printAlignment.worst.toFixed(3)}px`,
+  );
+
+  // 4. Clean up through the UI: deleting the draft inspection removes everything it created.
+  await navigate(`/inspections/${inspectionId}`);
+  await waitFor(`!!${elByText("button", "Delete")}`, "delete button");
+  await realClick(elByText("button", "Delete"));
+  await waitFor(`!!${el("dialog[open]")}`, "delete dialog");
+  await realClick(elByText("dialog[open] button", "Delete inspection"));
+  await waitFor(`location.pathname === "/"`, "back on dashboard");
+  const left = await Promise.all(["inspections", "photos", "photoBlobs", "annotations"].map(async (store) =>
+    (await readAll(store)).filter((r) => r.inspectionId === inspectionId || r.id === inspectionId).length));
+  record("Demo photo: the temporary inspection and its photo and annotation are removed afterwards", left.every((n) => n === 0), left.join(","));
+}
+
 try {
   await send("Page.enable");
   await send("Runtime.enable");
@@ -1681,6 +1778,7 @@ try {
   const findingsContext = await findingsWorkflow();
   await reviewAndFinalisation(findingsContext);
   await reportsAndExport(findingsContext.inspectionId);
+  await exifOrientedDemoPhoto();
 } catch (error) {
   record("Browser run aborted", false, error.message);
   try {
